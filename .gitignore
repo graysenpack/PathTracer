@@ -1,0 +1,17 @@
+# Gradle build output
+build/
+.gradle/
+
+# Minecraft run directory (worlds, logs, configs generated at runtime)
+run/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# Fabric Loom cache
+.loom-cache/
