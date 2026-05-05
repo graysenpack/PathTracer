@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Listens to client ticks and records which block the player is walking on.
@@ -56,8 +57,16 @@ public class WalkTracker {
             if (player.isPassenger())            return;
             if (player.getAbilities().flying)    return;
 
-            // Mojang: blockPosition() (was getBlockPos() in Yarn)
-            BlockPos groundPos = player.blockPosition().below();
+            // For most blocks, feet are in the air above the block.  But short
+            // blocks like Dirt Path (15/16 height) and sink blocks like Soul Sand
+            // / Mud partially swallow the player, so the feet block position IS
+            // the block we want.  Rule: if the block at feetPos is solid
+            // (non-air, non-liquid), use feetPos; otherwise fall back to below.
+            BlockPos feetPos = player.blockPosition();
+            BlockState feetBlock = client.level.getBlockState(feetPos);
+            BlockPos groundPos = (!feetBlock.isAir() && feetBlock.getFluidState().isEmpty())
+                    ? feetPos
+                    : feetPos.below();
 
             if (!groundPos.equals(lastTrackedPos)) {
                 lastTrackedPos = groundPos;

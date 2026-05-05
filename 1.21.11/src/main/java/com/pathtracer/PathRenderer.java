@@ -4,7 +4,6 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.VertexConsumer;
@@ -14,7 +13,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -24,27 +22,13 @@ import java.util.Map;
  *
  * Color gradient (all values tweakable in WalkDataStore):
  *   - Below MIN_WALK_THRESHOLD  →  invisible
- *   - At MIN_WALK_THRESHOLD     →  faint yellow  (255, 255, 0, alpha ~50)
- *   - At MAX_WALK_COUNT         →  bright green  (0,   255, 0, alpha ~160)
- *
- * Iris shader compatibility:
- *   Without Iris (or Iris active but no shader pack loaded):
- *     – Renders in BEFORE_TRANSLUCENT, which is the correct semantic slot.
- *   With Iris shaders active:
- *     – Renders in END_MAIN, which fires after Iris has finished compositing
- *       its deferred framebuffers, so the overlay paints on top correctly.
- *   Detection is done at render time via reflection so no compile-time
- *   dependency on Iris is required.
+ *   - At MIN_WALK_THRESHOLD     →  faint green   (0,   255, 0, alpha ~50)
+ *   - At MAX_WALK_COUNT         →  bright red    (255,   0, 0, alpha ~180)
  */
 @Environment(EnvType.CLIENT)
 public class PathRenderer {
 
     private static boolean overlayEnabled = true;
-
-    // ── Iris reflection cache ─────────────────────────────────────────────────
-    private static boolean   irisReflInitialized = false;
-    private static Method    irisGetInstance     = null;
-    private static Method    irisIsShaderPackInUse = null;
 
     public static void toggleOverlay() {
         overlayEnabled = !overlayEnabled;
@@ -61,17 +45,7 @@ public class PathRenderer {
     }
 
     public static void register() {
-        // Without Iris shaders: render in BEFORE_TRANSLUCENT (ideal depth slot).
-        WorldRenderEvents.BEFORE_TRANSLUCENT.register(context -> {
-            if (!isShadersActive()) renderOverlay(context);
-        });
-
-        // With Iris shaders: render in END_MAIN, which fires after Iris has
-        // composited its deferred pass.  This ensures the overlay is drawn on
-        // top of the shader output rather than being swallowed by it.
-        WorldRenderEvents.END_MAIN.register(context -> {
-            if (isShadersActive()) renderOverlay(context);
-        });
+        WorldRenderEvents.BEFORE_TRANSLUCENT.register(context -> renderOverlay(context));
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────
@@ -179,36 +153,4 @@ public class PathRenderer {
         return new int[]{r, g, 0, a};
     }
 
-    // ── Iris detection ────────────────────────────────────────────────────────
-
-    /**
-     * Returns true if Iris is loaded AND a shader pack is currently active.
-     *
-     * Uses reflection so PathTracer compiles and runs regardless of whether
-     * Iris is installed.  Method objects are cached after the first call so
-     * the reflection overhead is paid only once.
-     */
-    private static boolean isShadersActive() {
-        if (!FabricLoader.getInstance().isModLoaded("iris")) return false;
-
-        // Lazy-initialise reflection cache
-        if (!irisReflInitialized) {
-            irisReflInitialized = true;
-            try {
-                Class<?> apiClass = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
-                irisGetInstance       = apiClass.getMethod("getInstance");
-                irisIsShaderPackInUse = apiClass.getMethod("isShaderPackInUse");
-            } catch (Exception e) {
-                // Iris installed but API unavailable / changed — treat as inactive
-            }
-        }
-
-        if (irisGetInstance == null || irisIsShaderPackInUse == null) return false;
-        try {
-            Object instance = irisGetInstance.invoke(null);
-            return (Boolean) irisIsShaderPackInUse.invoke(instance);
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }

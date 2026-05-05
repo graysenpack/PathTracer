@@ -6,7 +6,6 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
@@ -15,7 +14,6 @@ import net.minecraft.util.ARGB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,25 +21,20 @@ import java.util.Map;
 /**
  * Renders a colored overlay on top of blocks the player has walked on.
  * Updated for Minecraft 26.1 (official Mojang mappings):
- *   WorldRenderEvents  → LevelRenderEvents
- *   WorldRenderContext → LevelRenderContext
- *   MatrixStack        → PoseStack
- *   Vec3d              → Vec3
- *   RenderLayers       → RenderTypes
- *   context.matrices() → context.poseStack()
- *   context.consumers()→ context.bufferSource()
+ *   WorldRenderEvents   → LevelRenderEvents
+ *   WorldRenderContext  → LevelRenderContext
+ *   MatrixStack         → PoseStack
+ *   Vec3d               → Vec3
+ *   RenderLayers        → RenderTypes
+ *   context.matrices()  → context.poseStack()
+ *   context.consumers() → context.bufferSource()
  *   context.worldState()→ context.levelState()
- *   vertex()/color()   → addVertex()/setColor() with ARGB int
+ *   vertex()/color()    → addVertex()/setColor() with ARGB int
  */
 @Environment(EnvType.CLIENT)
 public class PathRenderer {
 
     private static boolean overlayEnabled = true;
-
-    // Iris reflection cache
-    private static boolean irisReflInitialized  = false;
-    private static Method  irisGetInstance       = null;
-    private static Method  irisIsShaderPackInUse = null;
 
     public static void toggleOverlay() {
         overlayEnabled = !overlayEnabled;
@@ -57,19 +50,7 @@ public class PathRenderer {
     public static boolean isOverlayEnabled() { return overlayEnabled; }
 
     public static void register() {
-        // Without Iris shaders: BEFORE_TRANSLUCENT_TERRAIN (was BEFORE_TRANSLUCENT in Yarn)
-        LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register(context -> {
-            if (!isShadersActive()) renderOverlay(context);
-        });
-
-        // With Iris shaders: END_MAIN (same name, now on LevelRenderEvents)
-        // Must call bufferSource().endBatch() after drawing in END_MAIN.
-        LevelRenderEvents.END_MAIN.register(context -> {
-            if (isShadersActive()) {
-                renderOverlay(context);
-                context.bufferSource().endBatch();
-            }
-        });
+        LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register(context -> renderOverlay(context));
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────
@@ -175,28 +156,4 @@ public class PathRenderer {
         return ARGB.color(a, r, g, 0);
     }
 
-    // ── Iris detection ────────────────────────────────────────────────────────
-
-    private static boolean isShadersActive() {
-        if (!FabricLoader.getInstance().isModLoaded("iris")) return false;
-
-        if (!irisReflInitialized) {
-            irisReflInitialized = true;
-            try {
-                Class<?> apiClass = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
-                irisGetInstance       = apiClass.getMethod("getInstance");
-                irisIsShaderPackInUse = apiClass.getMethod("isShaderPackInUse");
-            } catch (Exception e) {
-                // Iris installed but API unavailable — treat as inactive
-            }
-        }
-
-        if (irisGetInstance == null || irisIsShaderPackInUse == null) return false;
-        try {
-            Object instance = irisGetInstance.invoke(null);
-            return (Boolean) irisIsShaderPackInUse.invoke(instance);
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }
