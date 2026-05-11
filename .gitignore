@@ -1,5 +1,9 @@
-# Gradle build output
-build/
+# Gradle build output — ignore everything except the final jars
+build/*
+!build/libs/
+build/libs/*
+!build/libs/*.jar
+
 .gradle/
 
 # Minecraft run directory (worlds, logs, configs generated at runtime)
