@@ -50,7 +50,7 @@ public class PathRenderer {
     public static boolean isOverlayEnabled() { return overlayEnabled; }
 
     public static void register() {
-        LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register(context -> renderOverlay(context));
+        LevelRenderEvents.END_MAIN.register(context -> renderOverlay(context));
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────

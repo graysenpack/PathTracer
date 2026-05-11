@@ -24,6 +24,10 @@ import java.util.Map;
  *   - Below MIN_WALK_THRESHOLD  →  invisible
  *   - At MIN_WALK_THRESHOLD     →  faint green   (0,   255, 0, alpha ~50)
  *   - At MAX_WALK_COUNT         →  bright red    (255,   0, 0, alpha ~180)
+ *
+ * Iris shader compatibility: registers on END_MAIN instead of BEFORE_TRANSLUCENT
+ * so the overlay draws after Iris's gbuffer/composite passes, using the same
+ * VertexConsumerProvider that vanilla uses for debug layers.
  */
 @Environment(EnvType.CLIENT)
 public class PathRenderer {
@@ -45,7 +49,7 @@ public class PathRenderer {
     }
 
     public static void register() {
-        WorldRenderEvents.BEFORE_TRANSLUCENT.register(context -> renderOverlay(context));
+        WorldRenderEvents.END_MAIN.register(context -> renderOverlay(context));
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────
