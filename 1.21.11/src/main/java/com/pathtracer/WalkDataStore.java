@@ -36,6 +36,9 @@ public class WalkDataStore {
 
     // Block IDs that are never recorded. Populated from PathTracerConfig.
     public static Set<String> IGNORED_BLOCKS = new HashSet<>();
+
+    // Radius (blocks) used by the clear-area keybind.
+    public static int CLEAR_RADIUS = 32;
     // ─────────────────────────────────────────────────────────────────────────
 
     private static WalkDataStore instance;
@@ -156,6 +159,55 @@ public class WalkDataStore {
         if (pruned > 0) {
             System.out.println("[PathTracer] Pruned " + pruned + " expired walk entries.");
         }
+    }
+
+    /**
+     * Remove all walk entries within CLEAR_RADIUS blocks of the given position
+     * in the current dimension. Saves immediately.
+     *
+     * @return number of entries removed
+     */
+    public int clearArea(BlockPos center) {
+        int radius = CLEAR_RADIUS;
+        int before = walkMap.size();
+        walkMap.entrySet().removeIf(e -> {
+            BlockPos p = e.getKey();
+            return Math.abs(p.getX() - center.getX()) <= radius
+                && Math.abs(p.getZ() - center.getZ()) <= radius;
+        });
+        int removed = before - walkMap.size();
+        if (removed > 0) {
+            dirty = true;
+            saveData();
+        }
+        return removed;
+    }
+
+    /**
+     * Delete every dimension's data file for the current world and clear
+     * the in-memory map. Used by the "Clear All Dimensions" button.
+     */
+    public void clearAllDimensions() {
+        if (currentWorldId == null) return;
+        Path dir = worldDir();
+        try {
+            if (Files.exists(dir)) {
+                try (var stream = Files.list(dir)) {
+                    stream.filter(p -> p.toString().endsWith(".json"))
+                          .forEach(p -> {
+                              try { Files.delete(p); }
+                              catch (IOException ex) {
+                                  System.err.println("[PathTracer] Failed to delete " + p + ": " + ex.getMessage());
+                              }
+                          });
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("[PathTracer] Failed to list dimension files: " + e.getMessage());
+        }
+        walkMap.clear();
+        dirty = false;
+        System.out.println("[PathTracer] All dimension data cleared for: " + currentWorldId);
     }
 
     /** Clear all in-memory state. Called on world disconnect. */

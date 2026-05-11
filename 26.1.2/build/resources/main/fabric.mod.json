@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "path-tracer",
-  "version": "26.1.2-1.0.18",
+  "version": "26.1.2-1.0.19",
   "name": "Path Tracer",
   "description": "Client-side visual heatmap showing where you walk most. No world changes — purely visual.",
   "authors": [

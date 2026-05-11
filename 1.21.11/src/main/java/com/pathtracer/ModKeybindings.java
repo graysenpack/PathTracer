@@ -6,35 +6,54 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Registers the H-key toggle for the path overlay.
- * The keybind can be rebound in Options → Controls → Path Tracer.
+ * Registers keybinds for Path Tracer.
  *
- * In MC 1.21.11 the KeyBinding constructor's category parameter changed from
- * a raw String to a KeyBinding.Category object.  Custom categories are created
- * with KeyBinding.Category.create(String) where the String is a translation key
- * that appears in the Controls menu (defined in en_us.json).
+ *   H               — Toggle path overlay on/off
+ *   (unbound)       — Clear path data within clear radius in the current dimension
+ *
+ * Both appear in Options → Controls → Path Tracer and can be rebound.
  */
 @Environment(EnvType.CLIENT)
 public class ModKeybindings {
 
     public static KeyBinding toggleOverlay;
+    public static KeyBinding clearArea;
 
     public static void register() {
-        toggleOverlay = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.path-tracer.toggle",                          // translation key (en_us.json)
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_H,                                   // default: H
-                KeyBinding.Category.create(Identifier.of("path-tracer", "controls"))  // Controls section
-        ));
+        var category = KeyBinding.Category.create(
+                Identifier.of("path-tracer", "controls"));
 
-        // Poll the keybind each tick so it respects repeat-press correctly
+        toggleOverlay = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.path-tracer.toggle",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_H,
+                category));
+
+        clearArea = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.path-tracer.clear_area",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_UNKNOWN,   // unbound by default
+                category));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (toggleOverlay.wasPressed()) {
                 PathRenderer.toggleOverlay();
+            }
+            while (clearArea.wasPressed()) {
+                if (client.player == null) return;
+                BlockPos center  = client.player.getBlockPos();
+                int      removed = WalkDataStore.getInstance().clearArea(center);
+                client.player.sendMessage(
+                        Text.literal("§6[PathTracer] Cleared " + removed
+                                + " entries within " + WalkDataStore.CLEAR_RADIUS
+                                + " blocks (current dimension)"),
+                        true);
             }
         });
     }

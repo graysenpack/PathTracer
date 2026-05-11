@@ -11,61 +11,52 @@ import net.minecraft.text.Text;
 /**
  * Config screen for Path Tracer, opened via Mod Menu.
  *
- * Uses only proper MC widget objects (TextWidget + ButtonWidget) so that
- * all text goes through the standard widget render path.  Direct
- * DrawContext.drawCenteredTextWithShadow() calls were invisible in
- * environments with Architectury / Blur+ mixins active.
+ * Rows (top to bottom):
+ *   Min Walk Count · Max Walk Count · Render Radius · Max Age · Clear Radius
  *
- * Text widgets are manually centered by measuring text width via
- * textRenderer.getWidth() — alignCenter() is not available in 1.21.1.
- *
- * Layout per row (ROW_HEIGHT = 40 px):
- *
- *   y - 12  ── TextWidget label (centred)
- *   y       ── [−]  TextWidget value  [+]
+ * Buttons:
+ *   Done                    — save & close
+ *   Clear All Dimensions    — wipe all dimension data for the current world
  */
 @Environment(EnvType.CLIENT)
 public class PathTracerConfigScreen extends Screen {
 
-    private static final int ROW_HEIGHT  = 40;
-    private static final int FIRST_ROW_Y = 118;
+    private static final int ROW_HEIGHT  = 34;
+    private static final int FIRST_ROW_Y = 100;
     private static final int BTN_W       = 20;
     private static final int BTN_H       = 20;
-    // Fixed width for value display — wide enough for up to 3 digits
     private static final int VALUE_W     = 40;
-    // Gap between ±  buttons and the value label
     private static final int GAP         = 6;
 
     private final Screen parent;
 
-    // Working copies — written to config only when Done is pressed
     private int minWalkThreshold;
     private int maxWalkCount;
     private int renderRadius;
     private int maxAgeDays;
+    private int clearRadius;
 
-    // References to value TextWidgets so we can update them on ±
     private TextWidget[] valueWidgets;
 
     public PathTracerConfigScreen(Screen parent) {
         super(Text.literal("Path Tracer Settings"));
-        this.parent = parent;
+        this.parent           = parent;
         this.minWalkThreshold = PathTracerConfig.minWalkThreshold;
         this.maxWalkCount     = PathTracerConfig.maxWalkCount;
         this.renderRadius     = PathTracerConfig.renderRadius;
         this.maxAgeDays       = PathTracerConfig.maxAgeDays;
+        this.clearRadius      = PathTracerConfig.clearRadius;
     }
 
     @Override
     protected void init() {
         int cx = this.width / 2;
-        valueWidgets = new TextWidget[4];
+        valueWidgets = new TextWidget[5];
 
-        // Title widget — manually centered
+        // Title
         int titleW = textRenderer.getWidth(this.title);
-        addDrawableChild(
-                new TextWidget(cx - titleW / 2, 12, titleW + 2, 10,
-                        this.title, textRenderer));
+        addDrawableChild(new TextWidget(cx - titleW / 2, 12, titleW + 2, 10,
+                this.title, textRenderer));
 
         // Description lines
         String[] desc = {
@@ -76,8 +67,7 @@ public class PathTracerConfigScreen extends Screen {
         };
         for (int i = 0; i < desc.length; i++) {
             int dw = textRenderer.getWidth(desc[i]);
-            addDrawableChild(new TextWidget(
-                    cx - dw / 2, 30 + i * 11, dw + 2, 10,
+            addDrawableChild(new TextWidget(cx - dw / 2, 30 + i * 11, dw + 2, 10,
                     Text.literal(desc[i]), textRenderer));
         }
 
@@ -85,33 +75,50 @@ public class PathTracerConfigScreen extends Screen {
         addSettingRow(0, cx, "Min Walk Count",
                 PathTracerConfig.MIN_WALK_THRESHOLD_MIN,
                 PathTracerConfig.MIN_WALK_THRESHOLD_MAX,
-                () -> minWalkThreshold,
-                v  -> minWalkThreshold = v);
+                () -> minWalkThreshold, v -> minWalkThreshold = v);
 
         addSettingRow(1, cx, "Max Walk Count",
                 PathTracerConfig.MAX_WALK_COUNT_MIN,
                 PathTracerConfig.MAX_WALK_COUNT_MAX,
-                () -> maxWalkCount,
-                v  -> maxWalkCount = v);
+                () -> maxWalkCount, v -> maxWalkCount = v);
 
         addSettingRow(2, cx, "Render Radius (blocks)",
                 PathTracerConfig.RENDER_RADIUS_MIN,
                 PathTracerConfig.RENDER_RADIUS_MAX,
-                () -> renderRadius,
-                v  -> renderRadius = v);
+                () -> renderRadius, v -> renderRadius = v);
 
         addSettingRow(3, cx, "Max Age (in-game days)",
                 PathTracerConfig.MAX_AGE_DAYS_MIN,
                 PathTracerConfig.MAX_AGE_DAYS_MAX,
-                () -> maxAgeDays,
-                v  -> maxAgeDays = v);
+                () -> maxAgeDays, v -> maxAgeDays = v);
 
-        // Done button
-        int doneY = rowY(3) + BTN_H + 18;
+        addSettingRow(4, cx, "Clear Radius (blocks)",
+                PathTracerConfig.CLEAR_RADIUS_MIN,
+                PathTracerConfig.CLEAR_RADIUS_MAX,
+                () -> clearRadius, v -> clearRadius = v);
+
+        // Buttons — Done left, Clear All Dimensions right
+        int btnY    = rowY(4) + BTN_H + 14;
+        int btnW    = (this.width / 2) - 8;   // half width minus a small margin
+        int doneX   = cx - btnW - 4;
+        int clearX  = cx + 4;
+
         addDrawableChild(
                 ButtonWidget.builder(Text.literal("Done"), btn -> saveAndClose())
-                        .position(cx - 75, doneY)
-                        .size(150, 20)
+                        .position(doneX, btnY)
+                        .size(btnW, 20)
+                        .build());
+
+        addDrawableChild(
+                ButtonWidget.builder(
+                        Text.literal("§cClear All Dimensions"),
+                        btn -> {
+                            WalkDataStore.getInstance().clearAllDimensions();
+                            btn.setMessage(Text.literal("§aAll data cleared!"));
+                            btn.active = false;
+                        })
+                        .position(clearX, btnY)
+                        .size(btnW, 20)
                         .build());
     }
 
@@ -122,13 +129,10 @@ public class PathTracerConfigScreen extends Screen {
                                IntSupplier getter, IntConsumer setter) {
         int y = rowY(index);
 
-        // Label — manually centered
         int labelW = textRenderer.getWidth(label);
-        addDrawableChild(
-                new TextWidget(cx - labelW / 2, y - 12, labelW + 2, 10,
-                        Text.literal(label), textRenderer));
+        addDrawableChild(new TextWidget(cx - labelW / 2, y - 12, labelW + 2, 10,
+                Text.literal(label), textRenderer));
 
-        // Minus button
         addDrawableChild(
                 ButtonWidget.builder(Text.literal("−"), btn -> {
                     setter.accept(clamp(getter.get() - 1, min, max));
@@ -139,13 +143,11 @@ public class PathTracerConfigScreen extends Screen {
                 .size(BTN_W, BTN_H)
                 .build());
 
-        // Value display — fixed-width widget centred between the two buttons
         TextWidget vw = new TextWidget(cx - VALUE_W / 2, y + 6, VALUE_W, 10,
                 Text.literal(String.valueOf(getter.get())), textRenderer);
         valueWidgets[index] = vw;
         addDrawableChild(vw);
 
-        // Plus button
         addDrawableChild(
                 ButtonWidget.builder(Text.literal("+"), btn -> {
                     setter.accept(clamp(getter.get() + 1, min, max));
@@ -161,22 +163,19 @@ public class PathTracerConfigScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // All text is handled by TextWidget / ButtonWidget — no direct
-        // drawCenteredTextWithShadow calls needed or used.
         super.render(context, mouseX, mouseY, delta);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private int rowY(int i) {
-        return FIRST_ROW_Y + i * ROW_HEIGHT;
-    }
+    private int rowY(int i) { return FIRST_ROW_Y + i * ROW_HEIGHT; }
 
     private void saveAndClose() {
         PathTracerConfig.minWalkThreshold = minWalkThreshold;
         PathTracerConfig.maxWalkCount     = maxWalkCount;
         PathTracerConfig.renderRadius     = renderRadius;
         PathTracerConfig.maxAgeDays       = maxAgeDays;
+        PathTracerConfig.clearRadius      = clearRadius;
         PathTracerConfig.save();
         close();
     }

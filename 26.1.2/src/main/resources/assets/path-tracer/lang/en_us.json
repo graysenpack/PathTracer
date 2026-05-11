@@ -1,4 +1,5 @@
 {
   "key.path-tracer.toggle": "Toggle Path Overlay",
+  "key.path-tracer.clear_area": "Clear Nearby Path Data",
   "key.categories.path-tracer.controls": "Path Tracer"
 }
