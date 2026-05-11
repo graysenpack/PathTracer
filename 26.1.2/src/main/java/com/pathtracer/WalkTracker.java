@@ -30,8 +30,11 @@ public class WalkTracker {
 
         // ── World join ────────────────────────────────────────────────────────
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            String worldId = resolveWorldId(client);
-            WalkDataStore.getInstance().loadForWorld(worldId);
+            String worldId     = resolveWorldId(client);
+            String dimensionId = client.level != null
+                    ? client.level.dimension().identifier().toString()
+                    : "minecraft:overworld";
+            WalkDataStore.getInstance().loadForWorld(worldId, dimensionId);
             lastTrackedPos = null;
             saveTimer      = 0;
             pruneTimer     = 0;
@@ -47,11 +50,17 @@ public class WalkTracker {
         // ── Per-tick tracking ─────────────────────────────────────────────────
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LocalPlayer player = client.player;
-            // Mojang: client.level (was client.world in Yarn)
             if (player == null || client.level == null) return;
 
+            // Detect dimension changes (portal travel) and swap data stores.
+            String dimensionId = client.level.dimension().identifier().toString();
+            WalkDataStore store = WalkDataStore.getInstance();
+            if (!dimensionId.equals(store.getCurrentDimensionId())) {
+                store.switchDimension(dimensionId);
+                lastTrackedPos = null;
+            }
+
             // Gate: only track genuine overland walking
-            // Mojang: onGround() (was isOnGround() in Yarn)
             if (!player.onGround())              return;
             if (player.isSwimming())             return;
             // Mojang: isPassenger() (was hasVehicle() in Yarn)
@@ -78,9 +87,7 @@ public class WalkTracker {
                 String blockId = BuiltInRegistries.BLOCK
                         .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
                 if (!WalkDataStore.IGNORED_BLOCKS.contains(blockId)) {
-                    // Mojang: getGameTime() (was getTime() in Yarn)
                     long currentGameDay = client.level.getGameTime() / 24000L;
-                    WalkDataStore store = WalkDataStore.getInstance();
 
                     for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
                         for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {

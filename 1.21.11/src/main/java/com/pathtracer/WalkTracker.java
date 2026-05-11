@@ -48,8 +48,11 @@ public class WalkTracker {
 
         // ── World join ────────────────────────────────────────────────────────
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            String worldId = resolveWorldId(client);
-            WalkDataStore.getInstance().loadForWorld(worldId);
+            String worldId     = resolveWorldId(client);
+            String dimensionId = client.world != null
+                    ? client.world.getRegistryKey().getValue().toString()
+                    : "minecraft:overworld";
+            WalkDataStore.getInstance().loadForWorld(worldId, dimensionId);
             lastTrackedPos = null;
             saveTimer      = 0;
             pruneTimer     = 0;
@@ -66,6 +69,14 @@ public class WalkTracker {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             ClientPlayerEntity player = client.player;
             if (player == null || client.world == null) return;
+
+            // Detect dimension changes (portal travel) and swap data stores.
+            String dimensionId = client.world.getRegistryKey().getValue().toString();
+            WalkDataStore store = WalkDataStore.getInstance();
+            if (!dimensionId.equals(store.getCurrentDimensionId())) {
+                store.switchDimension(dimensionId);
+                lastTrackedPos = null;
+            }
 
             // Gate: only track genuine overland walking
             if (!player.isOnGround())           return;
@@ -93,9 +104,7 @@ public class WalkTracker {
                 String blockId = Registries.BLOCK
                         .getId(client.world.getBlockState(groundPos).getBlock()).toString();
                 if (!WalkDataStore.IGNORED_BLOCKS.contains(blockId)) {
-                    // Divide total world ticks by 24 000 to get the current in-game day number.
                     long currentGameDay = client.world.getTime() / 24000L;
-                    WalkDataStore store = WalkDataStore.getInstance();
 
                     // Record the center block and all neighbours within FOOTPRINT_RADIUS.
                     // A 3×3 footprint (radius = 1) naturally bridges 1–2 block jump gaps:
