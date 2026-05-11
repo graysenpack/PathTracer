@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -57,26 +58,34 @@ public class WalkTracker {
             if (player.isPassenger())            return;
             if (player.getAbilities().flying)    return;
 
-            // For most blocks, feet are in the air above the block.  But short
-            // blocks like Dirt Path (15/16 height) and sink blocks like Soul Sand
-            // / Mud partially swallow the player, so the feet block position IS
-            // the block we want.  Rule: if the block at feetPos is solid
-            // (non-air, non-liquid), use feetPos; otherwise fall back to below.
+            // Determine which block the player is actually standing on.
+            // Soul Sand / Mud / Dirt Path have a collision shape that reaches
+            // the player's feet, so feetPos IS the block we want.
+            // Flowers, grass, and other passable blocks have an empty collision
+            // shape — the player walks through them — so we fall back to the
+            // solid block below, avoiding a spurious overlay on the plant.
             BlockPos feetPos = player.blockPosition();
             BlockState feetBlock = client.level.getBlockState(feetPos);
-            BlockPos groundPos = (!feetBlock.isAir() && feetBlock.getFluidState().isEmpty())
-                    ? feetPos
-                    : feetPos.below();
+            boolean feetHasCollision = !feetBlock.isAir()
+                    && feetBlock.getFluidState().isEmpty()
+                    && !feetBlock.getCollisionShape(client.level, feetPos).isEmpty();
+            BlockPos groundPos = feetHasCollision ? feetPos : feetPos.below();
 
             if (!groundPos.equals(lastTrackedPos)) {
                 lastTrackedPos = groundPos;
-                // Mojang: getGameTime() (was getTime() in Yarn)
-                long currentGameDay = client.level.getGameTime() / 24000L;
-                WalkDataStore store = WalkDataStore.getInstance();
 
-                for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
-                    for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
-                        store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
+                // Skip blocks the player should not leave a trail on (grass, flowers, etc.).
+                String blockId = BuiltInRegistries.BLOCK
+                        .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
+                if (!WalkDataStore.IGNORED_BLOCKS.contains(blockId)) {
+                    // Mojang: getGameTime() (was getTime() in Yarn)
+                    long currentGameDay = client.level.getGameTime() / 24000L;
+                    WalkDataStore store = WalkDataStore.getInstance();
+
+                    for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
+                        for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
+                            store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
+                        }
                     }
                 }
             }

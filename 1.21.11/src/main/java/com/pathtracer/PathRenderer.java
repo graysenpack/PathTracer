@@ -4,9 +4,11 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
@@ -39,7 +41,6 @@ public class PathRenderer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
             String state = overlayEnabled ? "§aEnabled" : "§cDisabled";
-            // Show in the action bar (above hotbar), not in chat
             client.player.sendMessage(Text.literal("[PathTracer] Overlay " + state), true);
         }
     }
@@ -49,7 +50,27 @@ public class PathRenderer {
     }
 
     public static void register() {
+        // Tell Iris to route our pipeline through its BASIC program so it is
+        // composited correctly rather than discarded or overwritten.
+        // Using reflection avoids a compile-time dependency on the Iris jar.
+        if (FabricLoader.getInstance().isModLoaded("iris")) {
+            assignIrisPipeline();
+        }
+
         WorldRenderEvents.END_MAIN.register(context -> renderOverlay(context));
+    }
+
+    private static void assignIrisPipeline() {
+        try {
+            Class<?> apiClass     = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+            Class<?> programClass = Class.forName("net.irisshaders.iris.api.v0.IrisProgram");
+            Object   api          = apiClass.getMethod("getInstance").invoke(null);
+            Object   basic        = programClass.getField("BASIC").get(null);
+            apiClass.getMethod("assignPipeline",
+                            com.mojang.blaze3d.pipeline.RenderPipeline.class,
+                            programClass)
+                    .invoke(api, RenderLayers.debugFilledBox().getRenderPipeline(), basic);
+        } catch (Exception ignored) {}
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────
@@ -66,13 +87,11 @@ public class PathRenderer {
         Map<BlockPos, WalkData> walkMap = WalkDataStore.getInstance().getWalkMap();
         if (walkMap.isEmpty()) return;
 
-        // Camera position via the 1.21.11 render-state system
         Vec3d camPos = context.worldState().cameraRenderState.pos;
         BlockPos playerPos = client.player.getBlockPos();
         int      radius   = WalkDataStore.RENDER_RADIUS;
         int      minWalks = WalkDataStore.MIN_WALK_THRESHOLD;
 
-        // ── Pre-filter: collect only entries that should be drawn ─────────────
         List<Map.Entry<BlockPos, WalkData>> toRender = new ArrayList<>();
         for (Map.Entry<BlockPos, WalkData> entry : walkMap.entrySet()) {
             BlockPos pos  = entry.getKey();
@@ -86,13 +105,12 @@ public class PathRenderer {
         }
         if (toRender.isEmpty()) return;
 
-        // ── Vertex consumer for transparent coloured quads ────────────────────
-        // DEBUG_FILLED_BOX is a translucent POSITION_COLOR render layer.
-        // The world renderer flushes the consumer automatically after the event.
-        VertexConsumer vertexConsumer =
-                context.consumers().getBuffer(RenderLayers.debugFilledBox());
+        // Submit through consumers() so Iris (if active) can intercept and route
+        // via the assigned BASIC program. Flushed immediately below so vertices
+        // are drawn while the 3D camera matrices are still active.
+        var layer = RenderLayers.debugFilledBox();
+        VertexConsumer vertexConsumer = context.consumers().getBuffer(layer);
 
-        // Translate from camera-relative space to world space
         matrices.push();
         matrices.translate(-camPos.x, -camPos.y, -camPos.z);
         Matrix4f mat = matrices.peek().getPositionMatrix();
@@ -105,7 +123,7 @@ public class PathRenderer {
             int   r = color[0], g = color[1], b = color[2], a = color[3];
 
             float x1 = pos.getX();
-            float y  = pos.getY() + 1.002f;   // just above the block's top face
+            float y  = pos.getY() + 1.002f;
             float z1 = pos.getZ();
             float x2 = x1 + 1.0f;
             float z2 = z1 + 1.0f;
@@ -117,6 +135,11 @@ public class PathRenderer {
         }
 
         matrices.pop();
+
+        // Flush immediately while the 3D camera matrices are still active.
+        if (context.consumers() instanceof VertexConsumerProvider.Immediate immediate) {
+            immediate.draw(layer);
+        }
     }
 
     // ── Color math ────────────────────────────────────────────────────────────
@@ -141,18 +164,16 @@ public class PathRenderer {
         final float third = 1.0f / 3.0f;
 
         if (t < third) {
-            // green → yellow: ramp red up, keep green at 255
             float s = t / third;
             r = Math.round(255 * s);
             g = 255;
         } else {
-            // yellow → orange → red: keep red at 255, ramp green down
             float s = (t - third) / (2.0f * third);
             r = 255;
             g = Math.round(255 * (1.0f - s));
         }
 
-        int a = Math.round(50 + 130 * t);   // 50 → 180
+        int a = Math.round(50 + 130 * t);
 
         return new int[]{r, g, 0, a};
     }

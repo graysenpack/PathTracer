@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 
 /**
@@ -72,31 +73,38 @@ public class WalkTracker {
             if (player.hasVehicle())             return;
             if (player.getAbilities().flying)    return;
 
-            // For most blocks, feet are in the air above the block (e.g. feet at
-            // y=65 → standing on y=64).  But short blocks like Dirt Path (15/16
-            // height) and sink blocks like Soul Sand / Mud partially swallow the
-            // player, so the feet block position IS the block we want.
-            // Rule: if the block at feetPos is solid (non-air, non-liquid), use
-            // feetPos directly; otherwise fall back to the block below.
+            // Determine which block the player is actually standing on.
+            // Soul Sand / Mud / Dirt Path have a collision shape that reaches
+            // the player's feet, so feetPos IS the block we want.
+            // Flowers, grass, and other passable blocks have an empty collision
+            // shape — the player walks through them — so we fall back to the
+            // solid block below, avoiding a spurious overlay on the plant.
             BlockPos feetPos = player.getBlockPos();
             BlockState feetBlock = client.world.getBlockState(feetPos);
-            BlockPos groundPos = (!feetBlock.isAir() && feetBlock.getFluidState().isEmpty())
-                    ? feetPos
-                    : feetPos.down();
+            boolean feetHasCollision = !feetBlock.isAir()
+                    && feetBlock.getFluidState().isEmpty()
+                    && !feetBlock.getCollisionShape(client.world, feetPos).isEmpty();
+            BlockPos groundPos = feetHasCollision ? feetPos : feetPos.down();
 
             if (!groundPos.equals(lastTrackedPos)) {
                 lastTrackedPos = groundPos;
-                // Divide total world ticks by 24 000 to get the current in-game day number.
-                long currentGameDay = client.world.getTime() / 24000L;
-                WalkDataStore store = WalkDataStore.getInstance();
 
-                // Record the center block and all neighbours within FOOTPRINT_RADIUS.
-                // A 3×3 footprint (radius = 1) naturally bridges 1–2 block jump gaps:
-                // the landing block's neighbourhood overlaps with the takeoff block's,
-                // so short jumps leave no visible gap in the overlay.
-                for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
-                    for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
-                        store.recordWalk(groundPos.add(dx, 0, dz), currentGameDay);
+                // Skip blocks the player should not leave a trail on (grass, flowers, etc.).
+                String blockId = Registries.BLOCK
+                        .getId(client.world.getBlockState(groundPos).getBlock()).toString();
+                if (!WalkDataStore.IGNORED_BLOCKS.contains(blockId)) {
+                    // Divide total world ticks by 24 000 to get the current in-game day number.
+                    long currentGameDay = client.world.getTime() / 24000L;
+                    WalkDataStore store = WalkDataStore.getInstance();
+
+                    // Record the center block and all neighbours within FOOTPRINT_RADIUS.
+                    // A 3×3 footprint (radius = 1) naturally bridges 1–2 block jump gaps:
+                    // the landing block's neighbourhood overlaps with the takeoff block's,
+                    // so short jumps leave no visible gap in the overlay.
+                    for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
+                        for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
+                            store.recordWalk(groundPos.add(dx, 0, dz), currentGameDay);
+                        }
                     }
                 }
             }

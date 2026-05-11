@@ -31,6 +31,9 @@ dependencies {
 
 	// Fabric API — use plain 'implementation' in unobfuscated Loom (no modImplementation)
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Iris — optional, compile-only so we can call IrisApi without bundling it
+	compileOnly files("${System.getProperty('user.home')}/Library/Application Support/minecraft/mods/iris-fabric-1.10.9+mc26.1.1.jar")
 }
 
 // Wire the modmenu stubs after Loom finishes configuring the classpath

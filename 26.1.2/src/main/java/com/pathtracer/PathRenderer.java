@@ -1,18 +1,20 @@
 package com.pathtracer;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.fabricmc.loader.api.FabricLoader;
+import net.irisshaders.iris.api.v0.IrisApi;
+import net.irisshaders.iris.api.v0.IrisProgram;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.ARGB;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,16 +22,17 @@ import java.util.Map;
 
 /**
  * Renders a colored overlay on top of blocks the player has walked on.
- * Updated for Minecraft 26.1 (official Mojang mappings):
- *   WorldRenderEvents   → LevelRenderEvents
- *   WorldRenderContext  → LevelRenderContext
- *   MatrixStack         → PoseStack
- *   Vec3d               → Vec3
- *   RenderLayers        → RenderTypes
- *   context.matrices()  → context.poseStack()
- *   context.consumers() → context.bufferSource()
- *   context.worldState()→ context.levelState()
- *   vertex()/color()    → addVertex()/setColor() with ARGB int
+ * Updated for Minecraft 26.1 (official Mojang mappings).
+ *
+ * Iris shader compatibility: at mod init we call IrisApi.assignPipeline() to
+ * register our debugFilledBox pipeline under IrisProgram.BASIC. This tells
+ * Iris to route our geometry through its own rendering pipeline so it gets
+ * included in compositing rather than being overwritten by finalizeLevelRendering().
+ *
+ * Vertices are submitted with camera-relative coordinates (world pos - cam pos)
+ * so RenderSystem's model-view (camera rotation) transforms them correctly.
+ * We call endBatch() immediately after submission to flush while the 3D camera
+ * matrices are still active.
  */
 @Environment(EnvType.CLIENT)
 public class PathRenderer {
@@ -41,7 +44,6 @@ public class PathRenderer {
         Minecraft client = Minecraft.getInstance();
         if (client.player != null) {
             String state = overlayEnabled ? "§aEnabled" : "§cDisabled";
-            // Mojang: sendOverlayMessage() for action bar (was sendMessage(text, true) in Yarn)
             client.player.sendOverlayMessage(
                     Component.literal("[PathTracer] Overlay " + state));
         }
@@ -50,7 +52,15 @@ public class PathRenderer {
     public static boolean isOverlayEnabled() { return overlayEnabled; }
 
     public static void register() {
-        LevelRenderEvents.END_MAIN.register(context -> renderOverlay(context));
+        // Tell Iris to route our pipeline through its BASIC program so it is
+        // composited correctly rather than discarded or overwritten.
+        if (FabricLoader.getInstance().isModLoaded("iris")) {
+            IrisApi.getInstance().assignPipeline(
+                    RenderTypes.debugFilledBox().pipeline(),
+                    IrisProgram.BASIC);
+        }
+
+        LevelRenderEvents.END_MAIN.register(PathRenderer::renderOverlay);
     }
 
     // ── Core render logic ─────────────────────────────────────────────────────
@@ -61,16 +71,10 @@ public class PathRenderer {
         Minecraft client = Minecraft.getInstance();
         if (client.player == null || client.level == null) return;
 
-        // Mojang: poseStack() (was matrices() in Yarn)
-        PoseStack poseStack = context.poseStack();
-        if (poseStack == null) return;
-
         Map<BlockPos, WalkData> walkMap = WalkDataStore.getInstance().getWalkMap();
         if (walkMap.isEmpty()) return;
 
-        // Mojang: context.levelState().cameraRenderState.pos (same field path, new class name)
-        Vec3     camPos    = context.levelState().cameraRenderState.pos;
-        // Mojang: blockPosition() (was getBlockPos() in Yarn)
+        Vec3     cam       = context.levelState().cameraRenderState.pos;
         BlockPos playerPos = client.player.blockPosition();
         int      radius    = WalkDataStore.RENDER_RADIUS;
         int      minWalks  = WalkDataStore.MIN_WALK_THRESHOLD;
@@ -79,46 +83,38 @@ public class PathRenderer {
         for (Map.Entry<BlockPos, WalkData> entry : walkMap.entrySet()) {
             BlockPos pos  = entry.getKey();
             WalkData data = entry.getValue();
-
             if (data.getCount() < minWalks) continue;
             if (Math.abs(pos.getX() - playerPos.getX()) > radius) continue;
             if (Math.abs(pos.getZ() - playerPos.getZ()) > radius) continue;
-
             toRender.add(entry);
         }
         if (toRender.isEmpty()) return;
 
-        // Mojang: bufferSource().getBuffer() (was consumers().getBuffer() in Yarn)
-        // Mojang: RenderTypes.debugFilledBox() (was RenderLayers.debugFilledBox() in Yarn)
-        VertexConsumer vertexConsumer =
-                context.bufferSource().getBuffer(RenderTypes.debugFilledBox());
-
-        poseStack.pushPose();
-        poseStack.translate(-camPos.x, -camPos.y, -camPos.z);
-        // Mojang: poseStack.last().pose() (was matrices.peek().getPositionMatrix() in Yarn)
-        Matrix4f mat = poseStack.last().pose();
+        // Submit through bufferSource so Iris (if active) can intercept and
+        // route via the assigned BASIC program. Camera-relative coordinates
+        // avoid any PoseStack accumulation issues.
+        MultiBufferSource.BufferSource bufferSource = context.bufferSource();
+        VertexConsumer vc = bufferSource.getBuffer(RenderTypes.debugFilledBox());
 
         for (Map.Entry<BlockPos, WalkData> entry : toRender) {
-            BlockPos pos  = entry.getKey();
-            WalkData data = entry.getValue();
+            BlockPos pos   = entry.getKey();
+            WalkData data  = entry.getValue();
+            int      color = computeColor(data.getCount());
 
-            // computeColor now returns an ARGB int (was int[] in 1.21.11)
-            int color = computeColor(data.getCount());
-
-            float x1 = pos.getX();
-            float y  = pos.getY() + 1.002f;
-            float z1 = pos.getZ();
+            float x1 = pos.getX() - (float) cam.x;
+            float y  = pos.getY() + 1.002f - (float) cam.y;
+            float z1 = pos.getZ() - (float) cam.z;
             float x2 = x1 + 1.0f;
             float z2 = z1 + 1.0f;
 
-            // Mojang: addVertex().setColor(argbInt) (was vertex().color(r,g,b,a) in Yarn)
-            vertexConsumer.addVertex(mat, x1, y, z1).setColor(color);
-            vertexConsumer.addVertex(mat, x1, y, z2).setColor(color);
-            vertexConsumer.addVertex(mat, x2, y, z2).setColor(color);
-            vertexConsumer.addVertex(mat, x2, y, z1).setColor(color);
+            vc.addVertex(x1, y, z1).setColor(color);
+            vc.addVertex(x1, y, z2).setColor(color);
+            vc.addVertex(x2, y, z2).setColor(color);
+            vc.addVertex(x2, y, z1).setColor(color);
         }
 
-        poseStack.popPose();
+        // Flush immediately while the 3D camera matrices are still active.
+        bufferSource.endBatch(RenderTypes.debugFilledBox());
     }
 
     // ── Color math ────────────────────────────────────────────────────────────
@@ -152,7 +148,6 @@ public class PathRenderer {
 
         int a = Math.round(50 + 130 * t);
 
-        // Mojang: ARGB.color(alpha, red, green, blue) returns packed int
         return ARGB.color(a, r, g, 0);
     }
 

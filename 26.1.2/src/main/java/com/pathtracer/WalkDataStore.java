@@ -8,9 +8,12 @@ import net.minecraft.core.BlockPos;
 
 import java.io.*;
 import java.nio.file.*;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 
 @Environment(EnvType.CLIENT)
 public class WalkDataStore {
@@ -20,6 +23,9 @@ public class WalkDataStore {
     public static int  MAX_WALK_COUNT     = 60;
     public static long MAX_AGE_DAYS       = 28;
     public static int  RENDER_RADIUS      = 64;
+
+    // Block IDs that are never recorded. Populated from PathTracerConfig.
+    public static Set<String> IGNORED_BLOCKS = new HashSet<>();
 
     private static WalkDataStore instance;
 
