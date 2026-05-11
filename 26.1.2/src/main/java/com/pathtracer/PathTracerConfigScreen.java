@@ -12,66 +12,66 @@ import net.minecraft.network.chat.Component;
  * Config screen for Path Tracer, opened via Mod Menu.
  * Updated for Minecraft 26.1 (official Mojang mappings).
  *
- * Each setting is a labelled text field. Values are parsed and clamped
- * when Done is pressed; invalid or empty entries revert to the value
- * the screen opened with.
- *
- * Rows (top to bottom):
- *   Min Walk Count · Max Walk Count · Render Radius · Max Age · Clear Radius
- *
- * Buttons:
- *   Done                 — save & close
- *   Clear All Dimensions — wipe all dimension data for the current world
+ * Layout (top → bottom):
+ *   Footprint Size  — cycle button  (1×1 / 3×3 / 5×5)
+ *   Min Passes      — text field
+ *   Max Passes      — text field
+ *   Render Radius   — text field
+ *   Max Age         — text field
+ *   Clear Radius    — text field
+ *   Track Other Players — toggle button
+ *   Done  |  Clear All Dimensions
  */
 @Environment(EnvType.CLIENT)
 public class PathTracerConfigScreen extends Screen {
 
-    private static final int ROW_HEIGHT   = 34;
-    private static final int FIRST_ROW_Y  = 100;
-    private static final int FIELD_W      = 80;
-    private static final int FIELD_H      = 20;
+    private static final int ROW_HEIGHT  = 32;
+    private static final int FIRST_ROW_Y = 90;
+    private static final int FIELD_W     = 80;
+    private static final int FIELD_H     = 20;
+
+    private static final String[] FOOTPRINT_LABELS = {"1×1", "3×3", "5×5"};
 
     private final Screen parent;
 
-    // Values the screen was opened with — used as fallback if a field is invalid.
+    private int     footprintRadius;
+    private boolean trackOtherPlayers;
+
     private final int[] initialValues = {
-        PathTracerConfig.minWalkThreshold,
-        PathTracerConfig.maxWalkCount,
+        PathTracerConfig.minPassCount,
+        PathTracerConfig.maxPassCount,
         PathTracerConfig.renderRadius,
         PathTracerConfig.maxAgeDays,
         PathTracerConfig.clearRadius,
     };
-
     private final int[] mins = {
-        PathTracerConfig.MIN_WALK_THRESHOLD_MIN,
-        PathTracerConfig.MAX_WALK_COUNT_MIN,
+        PathTracerConfig.PASS_COUNT_MIN,
+        PathTracerConfig.PASS_COUNT_MIN,
         PathTracerConfig.RENDER_RADIUS_MIN,
         PathTracerConfig.MAX_AGE_DAYS_MIN,
         PathTracerConfig.CLEAR_RADIUS_MIN,
     };
-
     private final int[] maxs = {
-        PathTracerConfig.MIN_WALK_THRESHOLD_MAX,
-        PathTracerConfig.MAX_WALK_COUNT_MAX,
+        PathTracerConfig.PASS_COUNT_MAX,
+        PathTracerConfig.PASS_COUNT_MAX,
         PathTracerConfig.RENDER_RADIUS_MAX,
         PathTracerConfig.MAX_AGE_DAYS_MAX,
         PathTracerConfig.CLEAR_RADIUS_MAX,
     };
-
     private final String[] labels = {
-        "Min Walk Count",
-        "Max Walk Count",
+        "Min Passes",
+        "Max Passes",
         "Render Radius (blocks)",
         "Max Age (in-game days)",
         "Clear Radius (blocks)",
     };
 
     private final EditBox[] fields = new EditBox[5];
-    private boolean trackOtherPlayers;
 
     public PathTracerConfigScreen(Screen parent) {
         super(Component.literal("Path Tracer Settings"));
         this.parent            = parent;
+        this.footprintRadius   = PathTracerConfig.footprintRadius;
         this.trackOtherPlayers = PathTracerConfig.trackOtherPlayers;
     }
 
@@ -84,12 +84,11 @@ public class PathTracerConfigScreen extends Screen {
         addRenderableWidget(new StringWidget(cx - titleW / 2, 12, titleW + 2, 10,
                 this.title, font));
 
-        // Description lines
+        // Description
         String[] desc = {
-            "Path Tracer counts the block you stand on + each of",
-            "the 8 surrounding blocks when you walk.",
-            "Min and Max Walk Count is divided by 3 per pass.",
-            "Ex. 3 trips over a block = 9 count."
+            "Min/Max Passes: how many walk-overs before the overlay appears / reaches full intensity.",
+            "Footprint controls how many blocks around you are recorded each step.",
+            "Changing footprint size automatically adjusts the internal thresholds."
         };
         for (int i = 0; i < desc.length; i++) {
             int dw = font.width(desc[i]);
@@ -97,26 +96,35 @@ public class PathTracerConfigScreen extends Screen {
                     Component.literal(desc[i]), font));
         }
 
-        // Setting rows — one text field per row
-        for (int i = 0; i < 5; i++) {
-            int y = rowY(i);
+        // ── Row 0: Footprint Size (cycle button) ──────────────────────────────
+        int fpY = rowY(0);
+        int fpLabelW = font.width("Footprint Size");
+        addRenderableWidget(new StringWidget(cx - fpLabelW / 2, fpY - 12, fpLabelW + 2, 10,
+                Component.literal("Footprint Size"), font));
+        addRenderableWidget(
+                Button.builder(Component.literal(FOOTPRINT_LABELS[footprintRadius]), btn -> {
+                    footprintRadius = (footprintRadius + 1) % 3;
+                    btn.setMessage(Component.literal(FOOTPRINT_LABELS[footprintRadius]));
+                })
+                .pos(cx - FIELD_W / 2, fpY)
+                .size(FIELD_W, FIELD_H)
+                .build());
 
-            // Centered label
+        // ── Rows 1-5: text fields ─────────────────────────────────────────────
+        for (int i = 0; i < 5; i++) {
+            int y = rowY(i + 1);
             int lw = font.width(labels[i]);
             addRenderableWidget(new StringWidget(cx - lw / 2, y - 12, lw + 2, 10,
                     Component.literal(labels[i]), font));
-
-            // Text field
-            EditBox field = new EditBox(
-                    font, cx - FIELD_W / 2, y, FIELD_W, FIELD_H, Component.empty());
+            EditBox field = new EditBox(font, cx - FIELD_W / 2, y, FIELD_W, FIELD_H, Component.empty());
             field.setMaxLength(5);
             field.setValue(String.valueOf(initialValues[i]));
             fields[i] = field;
             addRenderableWidget(field);
         }
 
-        // Track Other Players toggle
-        int toggleY = rowY(4) + FIELD_H + 10;
+        // ── Track Other Players toggle ────────────────────────────────────────
+        int toggleY = rowY(6) + 4;
         addRenderableWidget(
                 Button.builder(
                         Component.literal("Track Other Players: " + (trackOtherPlayers ? "§aON" : "§cOFF")),
@@ -129,7 +137,7 @@ public class PathTracerConfigScreen extends Screen {
                         .size(200, 20)
                         .build());
 
-        // Buttons
+        // ── Action buttons ────────────────────────────────────────────────────
         int btnY  = toggleY + 28;
         int btnW  = (this.width / 2) - 8;
         int doneX = cx - btnW - 4;
@@ -162,10 +170,11 @@ public class PathTracerConfigScreen extends Screen {
     }
 
     private void saveAndClose() {
-        PathTracerConfig.minWalkThreshold = parseField(0);
-        PathTracerConfig.maxWalkCount     = parseField(1);
-        PathTracerConfig.renderRadius     = parseField(2);
-        PathTracerConfig.maxAgeDays       = parseField(3);
+        PathTracerConfig.footprintRadius   = footprintRadius;
+        PathTracerConfig.minPassCount      = parseField(0);
+        PathTracerConfig.maxPassCount      = Math.max(parseField(1), PathTracerConfig.minPassCount);
+        PathTracerConfig.renderRadius      = parseField(2);
+        PathTracerConfig.maxAgeDays        = parseField(3);
         PathTracerConfig.clearRadius       = parseField(4);
         PathTracerConfig.trackOtherPlayers = trackOtherPlayers;
         PathTracerConfig.save();

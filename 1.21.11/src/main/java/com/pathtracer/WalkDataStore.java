@@ -37,6 +37,9 @@ public class WalkDataStore {
     // Block IDs that are never recorded. Populated from PathTracerConfig.
     public static Set<String> IGNORED_BLOCKS = new HashSet<>();
 
+    // Footprint radius: 0 = 1×1, 1 = 3×3, 2 = 5×5. Populated from PathTracerConfig.
+    public static int FOOTPRINT_RADIUS = 1;
+
     // Radius (blocks) used by the clear-area keybind.
     public static int CLEAR_RADIUS = 32;
 

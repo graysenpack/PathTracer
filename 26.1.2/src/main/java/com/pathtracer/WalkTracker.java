@@ -39,7 +39,6 @@ public class WalkTracker {
 
     private static final int SAVE_INTERVAL_TICKS  = 200;
     private static final int PRUNE_INTERVAL_TICKS = 6000;
-    private static final int FOOTPRINT_RADIUS     = 1;
 
     private static int saveTimer  = 0;
     private static int pruneTimer = 0;
@@ -139,8 +138,8 @@ public class WalkTracker {
         String blockId = BuiltInRegistries.BLOCK
                 .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
         if (WalkDataStore.IGNORED_BLOCKS.contains(blockId)) return;
-        for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
-            for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
+        for (int dx = -WalkDataStore.FOOTPRINT_RADIUS; dx <= WalkDataStore.FOOTPRINT_RADIUS; dx++) {
+            for (int dz = -WalkDataStore.FOOTPRINT_RADIUS; dz <= WalkDataStore.FOOTPRINT_RADIUS; dz++) {
                 store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
             }
         }
