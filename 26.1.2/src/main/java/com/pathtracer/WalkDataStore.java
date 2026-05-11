@@ -40,6 +40,9 @@ public class WalkDataStore {
     // Radius (blocks) used by the clear-area keybind.
     public static int CLEAR_RADIUS = 32;
 
+    // Whether to record walk data for other players in the same world.
+    public static boolean TRACK_OTHER_PLAYERS = false;
+
     private static WalkDataStore instance;
 
     private final Map<BlockPos, WalkData> walkMap = new HashMap<>();

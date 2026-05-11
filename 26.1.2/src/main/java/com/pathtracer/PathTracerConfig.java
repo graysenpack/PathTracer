@@ -71,7 +71,8 @@ public class PathTracerConfig {
         "minecraft:pink_petals", "minecraft:leaf_litter", "minecraft:glow_lichen"
     ));
     public static Set<String> ignoredBlocks = new HashSet<>(DEFAULT_IGNORED_BLOCKS);
-    public static int  clearRadius      = WalkDataStore.CLEAR_RADIUS;
+    public static int     clearRadius         = WalkDataStore.CLEAR_RADIUS;
+    public static boolean trackOtherPlayers  = WalkDataStore.TRACK_OTHER_PLAYERS;
 
     public static void load() {
         Path file = configFile();
@@ -83,7 +84,8 @@ public class PathTracerConfig {
                     if (obj.has("maxWalkCount"))     maxWalkCount     = obj.get("maxWalkCount").getAsInt();
                     if (obj.has("renderRadius"))     renderRadius     = obj.get("renderRadius").getAsInt();
                     if (obj.has("maxAgeDays"))       maxAgeDays       = obj.get("maxAgeDays").getAsInt();
-                    if (obj.has("clearRadius"))      clearRadius      = obj.get("clearRadius").getAsInt();
+                    if (obj.has("clearRadius"))       clearRadius        = obj.get("clearRadius").getAsInt();
+                    if (obj.has("trackOtherPlayers")) trackOtherPlayers  = obj.get("trackOtherPlayers").getAsBoolean();
                     if (obj.has("ignoredBlocks")) {
                         Set<String> blocks = new HashSet<>();
                         for (JsonElement e : obj.getAsJsonArray("ignoredBlocks"))
@@ -104,7 +106,8 @@ public class PathTracerConfig {
         obj.addProperty("maxWalkCount",     maxWalkCount);
         obj.addProperty("renderRadius",     renderRadius);
         obj.addProperty("maxAgeDays",       maxAgeDays);
-        obj.addProperty("clearRadius",      clearRadius);
+        obj.addProperty("clearRadius",        clearRadius);
+        obj.addProperty("trackOtherPlayers",  trackOtherPlayers);
         JsonArray arr = new JsonArray();
         ignoredBlocks.stream().sorted().forEach(arr::add);
         obj.add("ignoredBlocks", arr);
@@ -127,7 +130,8 @@ public class PathTracerConfig {
         WalkDataStore.RENDER_RADIUS      = renderRadius;
         WalkDataStore.MAX_AGE_DAYS       = maxAgeDays;
         WalkDataStore.IGNORED_BLOCKS     = new HashSet<>(ignoredBlocks);
-        WalkDataStore.CLEAR_RADIUS       = clearRadius;
+        WalkDataStore.CLEAR_RADIUS        = clearRadius;
+        WalkDataStore.TRACK_OTHER_PLAYERS = trackOtherPlayers;
     }
 
     private static Path configFile() {

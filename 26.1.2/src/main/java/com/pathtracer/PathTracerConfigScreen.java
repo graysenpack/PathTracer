@@ -67,10 +67,12 @@ public class PathTracerConfigScreen extends Screen {
     };
 
     private final EditBox[] fields = new EditBox[5];
+    private boolean trackOtherPlayers;
 
     public PathTracerConfigScreen(Screen parent) {
         super(Component.literal("Path Tracer Settings"));
-        this.parent = parent;
+        this.parent            = parent;
+        this.trackOtherPlayers = PathTracerConfig.trackOtherPlayers;
     }
 
     @Override
@@ -113,8 +115,22 @@ public class PathTracerConfigScreen extends Screen {
             addRenderableWidget(field);
         }
 
+        // Track Other Players toggle
+        int toggleY = rowY(4) + FIELD_H + 10;
+        addRenderableWidget(
+                Button.builder(
+                        Component.literal("Track Other Players: " + (trackOtherPlayers ? "§aON" : "§cOFF")),
+                        btn -> {
+                            trackOtherPlayers = !trackOtherPlayers;
+                            btn.setMessage(Component.literal("Track Other Players: "
+                                    + (trackOtherPlayers ? "§aON" : "§cOFF")));
+                        })
+                        .pos(cx - 100, toggleY)
+                        .size(200, 20)
+                        .build());
+
         // Buttons
-        int btnY  = rowY(4) + FIELD_H + 14;
+        int btnY  = toggleY + 28;
         int btnW  = (this.width / 2) - 8;
         int doneX = cx - btnW - 4;
         int clrX  = cx + 4;
@@ -150,7 +166,8 @@ public class PathTracerConfigScreen extends Screen {
         PathTracerConfig.maxWalkCount     = parseField(1);
         PathTracerConfig.renderRadius     = parseField(2);
         PathTracerConfig.maxAgeDays       = parseField(3);
-        PathTracerConfig.clearRadius      = parseField(4);
+        PathTracerConfig.clearRadius       = parseField(4);
+        PathTracerConfig.trackOtherPlayers = trackOtherPlayers;
         PathTracerConfig.save();
         onClose();
     }

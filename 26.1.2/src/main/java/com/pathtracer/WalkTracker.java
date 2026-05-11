@@ -8,20 +8,38 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 /**
- * Listens to client ticks and records which block the player is walking on.
+ * Listens to client ticks and records which block the player (and optionally
+ * other nearby players) is walking on.
  * Updated for Minecraft 26.1 (official Mojang mappings).
+ *
+ * Tracking rules (applied to both local and other players):
+ *   - Must be on the ground (not jumping/falling)
+ *   - Not swimming
+ *   - Not riding a vehicle
+ *   - Not in creative/spectator flight or spectator mode
+ *
+ * Other-player tracking is opt-in via PathTracerConfig.trackOtherPlayers.
  */
 @Environment(EnvType.CLIENT)
 public class WalkTracker {
 
     private static BlockPos lastTrackedPos = null;
 
+    // Last recorded ground position per other player — avoids recording the
+    // same position every tick when a player stands still.
+    private static final Map<UUID, BlockPos> otherPlayerLastPos = new HashMap<>();
+
     private static final int SAVE_INTERVAL_TICKS  = 200;
     private static final int PRUNE_INTERVAL_TICKS = 6000;
-    private static final int FOOTPRINT_RADIUS = 1;
+    private static final int FOOTPRINT_RADIUS     = 1;
 
     private static int saveTimer  = 0;
     private static int pruneTimer = 0;
@@ -36,8 +54,9 @@ public class WalkTracker {
                     : "minecraft:overworld";
             WalkDataStore.getInstance().loadForWorld(worldId, dimensionId);
             lastTrackedPos = null;
-            saveTimer      = 0;
-            pruneTimer     = 0;
+            otherPlayerLastPos.clear();
+            saveTimer  = 0;
+            pruneTimer = 0;
         });
 
         // ── World disconnect ──────────────────────────────────────────────────
@@ -45,6 +64,7 @@ public class WalkTracker {
             WalkDataStore.getInstance().saveData();
             WalkDataStore.getInstance().clear();
             lastTrackedPos = null;
+            otherPlayerLastPos.clear();
         });
 
         // ── Per-tick tracking ─────────────────────────────────────────────────
@@ -58,65 +78,79 @@ public class WalkTracker {
             if (!dimensionId.equals(store.getCurrentDimensionId())) {
                 store.switchDimension(dimensionId);
                 lastTrackedPos = null;
+                otherPlayerLastPos.clear();
             }
 
-            // Gate: only track genuine overland walking
-            if (!player.onGround())              return;
-            if (player.isSwimming())             return;
-            // Mojang: isPassenger() (was hasVehicle() in Yarn)
-            if (player.isPassenger())            return;
-            if (player.getAbilities().flying)    return;
+            long currentGameDay = client.level.getGameTime() / 24000L;
 
-            // Determine which block the player is actually standing on.
-            // Soul Sand / Mud / Dirt Path have a collision shape that reaches
-            // the player's feet, so feetPos IS the block we want.
-            // Flowers, grass, and other passable blocks have an empty collision
-            // shape — the player walks through them — so we fall back to the
-            // solid block below, avoiding a spurious overlay on the plant.
-            BlockPos feetPos = player.blockPosition();
-            BlockState feetBlock = client.level.getBlockState(feetPos);
-            boolean feetHasCollision = !feetBlock.isAir()
-                    && feetBlock.getFluidState().isEmpty()
-                    && !feetBlock.getCollisionShape(client.level, feetPos).isEmpty();
-            BlockPos groundPos = feetHasCollision ? feetPos : feetPos.below();
-
-            if (!groundPos.equals(lastTrackedPos)) {
-                lastTrackedPos = groundPos;
-
-                // Skip blocks the player should not leave a trail on (grass, flowers, etc.).
-                String blockId = BuiltInRegistries.BLOCK
-                        .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
-                if (!WalkDataStore.IGNORED_BLOCKS.contains(blockId)) {
-                    long currentGameDay = client.level.getGameTime() / 24000L;
-
-                    for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
-                        for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
-                            store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
-                        }
-                    }
+            // ── Local player ─────────────────────────────────────────────────
+            if (player.onGround() && !player.isSwimming()
+                    && !player.isPassenger() && !player.getAbilities().flying) {
+                BlockPos groundPos = resolveGroundPos(
+                        player.blockPosition(), client.level.getBlockState(player.blockPosition()), client);
+                if (!groundPos.equals(lastTrackedPos)) {
+                    lastTrackedPos = groundPos;
+                    recordIfAllowed(groundPos, store, currentGameDay, client);
                 }
             }
 
-            if (++saveTimer >= SAVE_INTERVAL_TICKS) {
-                saveTimer = 0;
-                WalkDataStore.getInstance().saveData();
+            // ── Other players ─────────────────────────────────────────────────
+            if (WalkDataStore.TRACK_OTHER_PLAYERS) {
+                for (Player other : client.level.players()) {
+                    if (other == player || other.isSpectator()) continue;
+                    if (!other.onGround() || other.isSwimming()
+                            || other.isPassenger() || other.getAbilities().flying) continue;
+
+                    BlockPos groundPos = resolveGroundPos(
+                            other.blockPosition(), client.level.getBlockState(other.blockPosition()), client);
+                    UUID uuid = other.getUUID();
+                    if (groundPos.equals(otherPlayerLastPos.get(uuid))) continue;
+                    otherPlayerLastPos.put(uuid, groundPos);
+                    recordIfAllowed(groundPos, store, currentGameDay, client);
+                }
             }
 
+            // ── Periodic save / prune ─────────────────────────────────────────
+            if (++saveTimer >= SAVE_INTERVAL_TICKS) {
+                saveTimer = 0;
+                store.saveData();
+            }
             if (++pruneTimer >= PRUNE_INTERVAL_TICKS) {
                 pruneTimer = 0;
-                long currentGameDay = client.level.getGameTime() / 24000L;
-                WalkDataStore.getInstance().pruneExpiredData(currentGameDay);
+                store.pruneExpiredData(currentGameDay);
             }
         });
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Determine the actual ground block, accounting for short/sink blocks. */
+    private static BlockPos resolveGroundPos(BlockPos feetPos, BlockState feetBlock,
+                                              Minecraft client) {
+        boolean feetHasCollision = !feetBlock.isAir()
+                && feetBlock.getFluidState().isEmpty()
+                && !feetBlock.getCollisionShape(client.level, feetPos).isEmpty();
+        return feetHasCollision ? feetPos : feetPos.below();
+    }
+
+    /** Record a 3×3 footprint if the ground block is not on the ignore list. */
+    private static void recordIfAllowed(BlockPos groundPos, WalkDataStore store,
+                                         long currentGameDay, Minecraft client) {
+        String blockId = BuiltInRegistries.BLOCK
+                .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
+        if (WalkDataStore.IGNORED_BLOCKS.contains(blockId)) return;
+        for (int dx = -FOOTPRINT_RADIUS; dx <= FOOTPRINT_RADIUS; dx++) {
+            for (int dz = -FOOTPRINT_RADIUS; dz <= FOOTPRINT_RADIUS; dz++) {
+                store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
+            }
+        }
+    }
+
     private static String resolveWorldId(Minecraft client) {
-        // Mojang: hasSingleplayerServer() + getSingleplayerServer() (were isInSingleplayer/getServer in Yarn)
         if (client.hasSingleplayerServer() && client.getSingleplayerServer() != null) {
             String levelName = client.getSingleplayerServer().getWorldData().getLevelName();
             return "sp_" + levelName;
         }
-        // Mojang: getCurrentServer() (was getCurrentServerEntry() in Yarn), .ip (was .address)
         if (client.getCurrentServer() != null) {
             return "mp_" + client.getCurrentServer().ip;
         }
