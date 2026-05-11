@@ -1,0 +1,84 @@
+plugins {
+    id 'fabric-loom' version '1.16.1'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    // Add repos here if needed
+}
+
+// Mod Menu stubs: local stub interfaces compiled with the project's own Java
+// toolchain so we never need Mod Menu on the compile classpath.  At runtime,
+// if Mod Menu is installed its real classes (which have identical erased
+// signatures) are used automatically via the fabric.mod.json entrypoint.
+sourceSets {
+    modmenuStubs {
+        java { srcDirs = ['src/modmenu-stubs/java'] }
+    }
+}
+
+// Wire the stubs after Loom has finished its own classpath setup.
+// modmenuStubs needs Minecraft on its classpath so Screen resolves.
+// main gets the compiled stubs as a compile-only addition.
+afterEvaluate {
+    compileModmenuStubsJava.classpath += sourceSets.main.compileClasspath
+    compileJava.classpath += sourceSets.modmenuStubs.output.classesDirs
+    compileJava.dependsOn compileModmenuStubsJava
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+def targetJavaVersion = 21
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
+        it.options.release = targetJavaVersion
+    }
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.archivesName}" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+    repositories {
+        // Define repos here to publish to
+    }
+}

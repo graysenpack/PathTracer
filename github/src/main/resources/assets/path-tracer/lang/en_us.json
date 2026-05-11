@@ -1,0 +1,8 @@
+{
+  "key.path-tracer.toggle": "Toggle Path Overlay",
+  "key.categories.path-tracer": "Path Tracer",
+  "key.categories.path-tracer.controls": "Path Tracer",
+  "key.category.path-tracer.controls": "Path Tracer",
+  "modmenu.nameTranslation.path-tracer": "Path Tracer",
+  "modmenu.descriptionTranslation.path-tracer": "Client-side visual heatmap showing where you walk most."
+}
