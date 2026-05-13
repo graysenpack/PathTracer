@@ -7,191 +7,302 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.gui.widget.TextWidget;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
 
 /**
- * Config screen for Path Tracer, opened via Mod Menu.
+ * Config screen for Path Tracer — three tabs.
  *
- * Layout (top → bottom):
- *   Footprint Size  — cycle button  (1×1 / 3×3 / 5×5)
- *   Min Passes      — text field
- *   Max Passes      — text field
- *   Render Radius   — text field
- *   Max Age         — text field
- *   Clear Radius    — text field
- *   Track Other Players — toggle button
- *   Done  |  Clear All Dimensions
+ * Each row uses a two-column layout: label on the left, control on the right.
+ * This matches the vanilla Controls screen style and prevents label/control overlap.
  */
 @Environment(EnvType.CLIENT)
 public class PathTracerConfigScreen extends Screen {
 
-    private static final int ROW_HEIGHT  = 32;
-    private static final int FIRST_ROW_Y = 90;
-    private static final int FIELD_W     = 80;
-    private static final int FIELD_H     = 20;
+    // ── Layout ────────────────────────────────────────────────────────────────
+    private static final int TAB_Y      = 28;
+    private static final int CONTENT_Y  = 56;
+    private static final int ROW_H      = 26;   // field height (20) + 6px gap
+    private static final int FIELD_H    = 20;
+    private static final int LABEL_X    = 8;    // left edge of all labels
 
     private static final String[] FOOTPRINT_LABELS = {"1×1", "3×3", "5×5"};
 
-    private final Screen parent;
+    // ── State ─────────────────────────────────────────────────────────────────
+    private final Screen   parent;
+    private int            activeTab         = 0;
+    private KeyBinding     activelyRebinding = null;
 
-    // Working values
-    private int     footprintRadius;
-    private boolean trackOtherPlayers;
-
-    // Text-field rows (index 0-4 = Min Passes, Max Passes, Render Radius, Max Age, Clear Radius)
-    private final int[] initialValues = {
-        PathTracerConfig.minPassCount,
-        PathTracerConfig.maxPassCount,
-        PathTracerConfig.renderRadius,
-        PathTracerConfig.maxAgeDays,
-        PathTracerConfig.clearRadius,
-    };
-    private final int[] mins = {
-        PathTracerConfig.PASS_COUNT_MIN,
-        PathTracerConfig.PASS_COUNT_MIN,
-        PathTracerConfig.RENDER_RADIUS_MIN,
-        PathTracerConfig.MAX_AGE_DAYS_MIN,
-        PathTracerConfig.CLEAR_RADIUS_MIN,
-    };
-    private final int[] maxs = {
-        PathTracerConfig.PASS_COUNT_MAX,
-        PathTracerConfig.PASS_COUNT_MAX,
-        PathTracerConfig.RENDER_RADIUS_MAX,
-        PathTracerConfig.MAX_AGE_DAYS_MAX,
-        PathTracerConfig.CLEAR_RADIUS_MAX,
-    };
-    private final String[] labels = {
-        "Min Passes",
-        "Max Passes",
-        "Render Radius (blocks)",
-        "Max Age (in-game days)",
-        "Clear Radius (blocks)",
-    };
-
-    private final TextFieldWidget[] fields = new TextFieldWidget[5];
+    private boolean workingExplorerMode;
+    private int     workingRenderRadius;
+    private int     workingClearRadius;
+    private boolean workingTrackOthers;
+    private int     workingFootprint;
+    private int     workingMinPasses;
+    private int     workingMaxPasses;
+    private int     workingPathMaxAge;
+    private int     workingGradientDays;
+    private int     workingExplorerMaxAge;
 
     public PathTracerConfigScreen(Screen parent) {
         super(Text.literal("Path Tracer Settings"));
-        this.parent            = parent;
-        this.footprintRadius   = PathTracerConfig.footprintRadius;
-        this.trackOtherPlayers = PathTracerConfig.trackOtherPlayers;
+        this.parent           = parent;
+        workingExplorerMode   = PathTracerConfig.explorerMode;
+        workingRenderRadius   = PathTracerConfig.renderRadius;
+        workingClearRadius    = PathTracerConfig.clearRadius;
+        workingTrackOthers    = PathTracerConfig.trackOtherPlayers;
+        workingFootprint      = PathTracerConfig.footprintRadius;
+        workingMinPasses      = PathTracerConfig.minPassCount;
+        workingMaxPasses      = PathTracerConfig.maxPassCount;
+        workingPathMaxAge     = PathTracerConfig.maxAgeDays;
+        workingGradientDays   = PathTracerConfig.explorerGradientDays;
+        workingExplorerMaxAge = PathTracerConfig.explorerMaxAgeDays;
     }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
 
     @Override
     protected void init() {
         int cx = this.width / 2;
 
-        // Title
-        int titleW = textRenderer.getWidth(this.title);
-        addDrawableChild(new TextWidget(cx - titleW / 2, 12, titleW + 2, 10,
-                this.title, textRenderer));
+        int tw = textRenderer.getWidth(this.title);
+        addDrawableChild(new TextWidget(cx - tw / 2, 10, tw + 2, 10, this.title, textRenderer));
 
-        // Description
-        String[] desc = {
-            "Min/Max Passes: how many walk-overs before the overlay appears / reaches full intensity.",
-            "Footprint controls how many blocks around you are recorded each step.",
-            "Changing footprint size automatically adjusts the internal thresholds."
-        };
-        for (int i = 0; i < desc.length; i++) {
-            int dw = textRenderer.getWidth(desc[i]);
-            addDrawableChild(new TextWidget(cx - dw / 2, 30 + i * 11, dw + 2, 10,
-                    Text.literal(desc[i]), textRenderer));
+        String[] names = {"General", "Path Mode", "Explorer Mode"};
+        int tabW = this.width / 3;
+        for (int i = 0; i < 3; i++) {
+            final int tab = i;
+            boolean active = (activeTab == i);
+            ButtonWidget btn = ButtonWidget.builder(
+                            Text.literal(active ? "§l§n" + names[i] : names[i]),
+                            b -> switchTab(tab))
+                    .position(i * tabW, TAB_Y)
+                    .size(i < 2 ? tabW : this.width - i * tabW, 20)
+                    .build();
+            btn.active = !active;
+            addDrawableChild(btn);
         }
 
-        // ── Row 0: Footprint Size (cycle button) ──────────────────────────────
-        int fpY = rowY(0);
-        int fpLabelW = textRenderer.getWidth("Footprint Size");
-        addDrawableChild(new TextWidget(cx - fpLabelW / 2, fpY - 12, fpLabelW + 2, 10,
-                Text.literal("Footprint Size"), textRenderer));
-        addDrawableChild(
-                ButtonWidget.builder(Text.literal(FOOTPRINT_LABELS[footprintRadius]), btn -> {
-                    footprintRadius = (footprintRadius + 1) % 3;
-                    btn.setMessage(Text.literal(FOOTPRINT_LABELS[footprintRadius]));
-                })
-                .position(cx - FIELD_W / 2, fpY)
-                .size(FIELD_W, FIELD_H)
-                .build());
-
-        // ── Rows 1-5: text fields ─────────────────────────────────────────────
-        for (int i = 0; i < 5; i++) {
-            int y = rowY(i + 1);
-            int lw = textRenderer.getWidth(labels[i]);
-            addDrawableChild(new TextWidget(cx - lw / 2, y - 12, lw + 2, 10,
-                    Text.literal(labels[i]), textRenderer));
-            TextFieldWidget field = new TextFieldWidget(
-                    textRenderer, cx - FIELD_W / 2, y, FIELD_W, FIELD_H, Text.empty());
-            field.setMaxLength(5);
-            field.setText(String.valueOf(initialValues[i]));
-            field.setTextPredicate(s -> s.matches("\\d*"));
-            fields[i] = field;
-            addDrawableChild(field);
+        switch (activeTab) {
+            case 0 -> buildGeneralTab(cx);
+            case 1 -> buildPathTab(cx);
+            case 2 -> buildExplorerTab(cx);
         }
-
-        // ── Track Other Players toggle ────────────────────────────────────────
-        int toggleY = rowY(6) + 4;
-        addDrawableChild(
-                ButtonWidget.builder(
-                        Text.literal("Track Other Players: " + (trackOtherPlayers ? "§aON" : "§cOFF")),
-                        btn -> {
-                            trackOtherPlayers = !trackOtherPlayers;
-                            btn.setMessage(Text.literal("Track Other Players: "
-                                    + (trackOtherPlayers ? "§aON" : "§cOFF")));
-                        })
-                        .position(cx - 100, toggleY)
-                        .size(200, 20)
-                        .build());
-
-        // ── Action buttons ────────────────────────────────────────────────────
-        int btnY  = toggleY + 28;
-        int btnW  = (this.width / 2) - 8;
-        int doneX = cx - btnW - 4;
-        int clrX  = cx + 4;
-
-        addDrawableChild(
-                ButtonWidget.builder(Text.literal("Done"), btn -> saveAndClose())
-                        .position(doneX, btnY).size(btnW, 20).build());
-
-        addDrawableChild(
-                ButtonWidget.builder(Text.literal("§cClear All Dimensions"), btn -> {
-                    WalkDataStore.getInstance().clearAllDimensions();
-                    btn.setMessage(Text.literal("§aAll data cleared!"));
-                    btn.active = false;
-                }).position(clrX, btnY).size(btnW, 20).build());
     }
+
+    // ── Tab content ───────────────────────────────────────────────────────────
+
+    private void buildGeneralTab(int cx) {
+        int y = CONTENT_Y;
+
+        String desc = "Path Mode: heat map of activity.  Explorer Mode: age-based trail.";
+        int dw = textRenderer.getWidth(desc);
+        addDrawableChild(new TextWidget(cx - dw / 2, y, dw + 2, 10,
+                Text.literal(desc), textRenderer));
+        y += 18;
+
+        row2Toggle(cx, y, "Mode",
+                workingExplorerMode ? "§bExplorer" : "§aPath Building",
+                btn -> {
+                    workingExplorerMode = !workingExplorerMode;
+                    btn.setMessage(Text.literal(workingExplorerMode ? "§bExplorer" : "§aPath Building"));
+                });
+        y += ROW_H;
+
+        row2Field(cx, y, "Render Radius (blocks)", workingRenderRadius,
+                PathTracerConfig.RENDER_RADIUS_MIN, PathTracerConfig.RENDER_RADIUS_MAX,
+                v -> workingRenderRadius = v);
+        y += ROW_H;
+
+        row2Field(cx, y, "Clear Radius (blocks)", workingClearRadius,
+                PathTracerConfig.CLEAR_RADIUS_MIN, PathTracerConfig.CLEAR_RADIUS_MAX,
+                v -> workingClearRadius = v);
+        y += ROW_H;
+
+        row2Key(cx, y, "Show / Hide Overlay", ModKeybindings.toggleOverlay); y += ROW_H;
+        row2Key(cx, y, "Clear Nearby Paths",  ModKeybindings.clearArea);     y += ROW_H;
+        row2Key(cx, y, "Toggle Mode",          ModKeybindings.toggleMode);    y += ROW_H;
+
+        row2Toggle(cx, y, "Other Players",
+                workingTrackOthers ? "§aON" : "§cOFF",
+                btn -> {
+                    workingTrackOthers = !workingTrackOthers;
+                    btn.setMessage(Text.literal(workingTrackOthers ? "§aON" : "§cOFF"));
+                });
+        y += ROW_H;
+
+        // Delete — full-width centered, destructive styling
+        addDrawableChild(ButtonWidget.builder(Text.literal("§cDelete All Paths"), btn -> {
+            WalkDataStore.getInstance().clearAllDimensions();
+            btn.setMessage(Text.literal("§aAll paths deleted!"));
+            btn.active = false;
+        }).position(cx - 100, y).size(200, FIELD_H).build());
+        y += ROW_H;
+
+        done(cx, y);
+    }
+
+    private void buildPathTab(int cx) {
+        int y = CONTENT_Y;
+
+        row2Toggle(cx, y, "Footprint Size",
+                FOOTPRINT_LABELS[workingFootprint],
+                btn -> {
+                    workingFootprint = (workingFootprint + 1) % 3;
+                    btn.setMessage(Text.literal(FOOTPRINT_LABELS[workingFootprint]));
+                });
+        y += ROW_H;
+
+        row2Field(cx, y, "Min Passes", workingMinPasses,
+                PathTracerConfig.PASS_COUNT_MIN, PathTracerConfig.PASS_COUNT_MAX,
+                v -> workingMinPasses = v);
+        y += ROW_H;
+
+        row2Field(cx, y, "Max Passes", workingMaxPasses,
+                PathTracerConfig.PASS_COUNT_MIN, PathTracerConfig.PASS_COUNT_MAX,
+                v -> workingMaxPasses = v);
+        y += ROW_H;
+
+        row2Field(cx, y, "Max Age — Path Mode (days)", workingPathMaxAge,
+                PathTracerConfig.MAX_AGE_DAYS_MIN, PathTracerConfig.MAX_AGE_DAYS_MAX,
+                v -> workingPathMaxAge = v);
+        y += ROW_H;
+
+        done(cx, y);
+    }
+
+    private void buildExplorerTab(int cx) {
+        int y = CONTENT_Y;
+
+        row2Field(cx, y, "Gradient Days (max 14)", workingGradientDays,
+                PathTracerConfig.EXPLORER_GRADIENT_MIN, PathTracerConfig.EXPLORER_GRADIENT_MAX,
+                v -> workingGradientDays = v);
+        y += ROW_H;
+
+        row2Field(cx, y, "Max Age — Explorer Mode (days)", workingExplorerMaxAge,
+                PathTracerConfig.EXPLORER_MAX_AGE_MIN, PathTracerConfig.EXPLORER_MAX_AGE_MAX,
+                v -> workingExplorerMaxAge = v);
+        y += ROW_H;
+
+        done(cx, y);
+    }
+
+    // ── Two-column row helpers ────────────────────────────────────────────────
+
+    /** Label on left, text field on right. */
+    private void row2Field(int cx, int y, String label, int initial, int min, int max,
+                            IntSetter setter) {
+        int ctrlX = cx + 5;
+        int ctrlW = this.width - ctrlX - 5;
+        int lw = textRenderer.getWidth(label);
+        addDrawableChild(new TextWidget(LABEL_X, y + 5, lw + 2, 10,
+                Text.literal(label), textRenderer));
+        TextFieldWidget f = new TextFieldWidget(textRenderer, ctrlX, y, ctrlW, FIELD_H, Text.empty());
+        f.setMaxLength(5);
+        f.setText(String.valueOf(initial));
+        f.setTextPredicate(s -> s.matches("\\d*"));
+        f.setChangedListener(s -> {
+            try { setter.set(Integer.parseInt(s)); }
+            catch (NumberFormatException ignored) {}
+        });
+        addDrawableChild(f);
+    }
+
+    /** Label on left, toggle/cycle button on right. */
+    private void row2Toggle(int cx, int y, String label, String btnText,
+                             ButtonWidget.PressAction action) {
+        int ctrlX = cx + 5;
+        int ctrlW = this.width - ctrlX - 5;
+        int lw = textRenderer.getWidth(label);
+        addDrawableChild(new TextWidget(LABEL_X, y + 5, lw + 2, 10,
+                Text.literal(label), textRenderer));
+        addDrawableChild(ButtonWidget.builder(Text.literal(btnText), action)
+                .position(ctrlX, y).size(ctrlW, FIELD_H).build());
+    }
+
+    /** Label on left, key-capture button + small Clear button on right. */
+    private void row2Key(int cx, int y, String label, KeyBinding binding) {
+        int ctrlX   = cx + 5;
+        int clearW  = 42;
+        int keyW    = this.width - ctrlX - 5 - clearW - 4;
+        int lw = textRenderer.getWidth(label);
+        addDrawableChild(new TextWidget(LABEL_X, y + 5, lw + 2, 10,
+                Text.literal(label), textRenderer));
+        boolean listening = (activelyRebinding == binding);
+        addDrawableChild(ButtonWidget.builder(
+                listening ? Text.literal("§ePress a key…") : binding.getBoundKeyLocalizedText(),
+                btn -> {
+                    activelyRebinding = (activelyRebinding == binding) ? null : binding;
+                    switchTab(activeTab);
+                })
+                .position(ctrlX, y).size(keyW, FIELD_H).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("✕ Clear"), btn -> {
+            binding.setBoundKey(InputUtil.UNKNOWN_KEY);
+            KeyBinding.updateKeysByCode();
+            if (client != null) client.options.write();
+            switchTab(activeTab);
+        }).position(ctrlX + keyW + 4, y).size(clearW, FIELD_H).build());
+    }
+
+    private void done(int cx, int y) {
+        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), btn -> saveAndClose())
+                .position(cx - 75, y).size(150, FIELD_H).build());
+    }
+
+    // ── Key capture ───────────────────────────────────────────────────────────
+
+    @Override
+    public boolean keyPressed(KeyInput input) {
+        if (activelyRebinding != null) {
+            if (input.key() != GLFW.GLFW_KEY_ESCAPE) {
+                activelyRebinding.setBoundKey(InputUtil.fromKeyCode(input));
+                KeyBinding.updateKeysByCode();
+                if (client != null) client.options.write();
+            }
+            activelyRebinding = null;
+            switchTab(activeTab);
+            return true;
+        }
+        return super.keyPressed(input);
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+
+    private void switchTab(int tab) {
+        activeTab = tab;
+        clearAndInit();
+    }
+
+    private void saveAndClose() {
+        PathTracerConfig.explorerMode         = workingExplorerMode;
+        PathTracerConfig.renderRadius         = clamp(workingRenderRadius, PathTracerConfig.RENDER_RADIUS_MIN, PathTracerConfig.RENDER_RADIUS_MAX);
+        PathTracerConfig.clearRadius          = clamp(workingClearRadius,  PathTracerConfig.CLEAR_RADIUS_MIN,  PathTracerConfig.CLEAR_RADIUS_MAX);
+        PathTracerConfig.trackOtherPlayers    = workingTrackOthers;
+        PathTracerConfig.footprintRadius      = workingFootprint;
+        PathTracerConfig.minPassCount         = clamp(workingMinPasses, PathTracerConfig.PASS_COUNT_MIN, PathTracerConfig.PASS_COUNT_MAX);
+        PathTracerConfig.maxPassCount         = Math.max(PathTracerConfig.minPassCount,
+                clamp(workingMaxPasses, PathTracerConfig.PASS_COUNT_MIN, PathTracerConfig.PASS_COUNT_MAX));
+        PathTracerConfig.maxAgeDays           = clamp(workingPathMaxAge,     PathTracerConfig.MAX_AGE_DAYS_MIN,      PathTracerConfig.MAX_AGE_DAYS_MAX);
+        PathTracerConfig.explorerGradientDays = clamp(workingGradientDays,   PathTracerConfig.EXPLORER_GRADIENT_MIN, PathTracerConfig.EXPLORER_GRADIENT_MAX);
+        PathTracerConfig.explorerMaxAgeDays   = clamp(workingExplorerMaxAge, PathTracerConfig.EXPLORER_MAX_AGE_MIN,  PathTracerConfig.EXPLORER_MAX_AGE_MAX);
+        PathTracerConfig.save();
+        close();
+    }
+
+    private static int clamp(int v, int min, int max) { return Math.max(min, Math.min(max, v)); }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private int rowY(int i) { return FIRST_ROW_Y + i * ROW_HEIGHT; }
-
-    private int parseField(int index) {
-        try {
-            String text = fields[index].getText().trim();
-            if (text.isEmpty()) return initialValues[index];
-            return Math.max(mins[index], Math.min(maxs[index], Integer.parseInt(text)));
-        } catch (NumberFormatException e) {
-            return initialValues[index];
-        }
-    }
-
-    private void saveAndClose() {
-        PathTracerConfig.footprintRadius   = footprintRadius;
-        PathTracerConfig.minPassCount      = parseField(0);
-        PathTracerConfig.maxPassCount      = Math.max(parseField(1), PathTracerConfig.minPassCount);
-        PathTracerConfig.renderRadius      = parseField(2);
-        PathTracerConfig.maxAgeDays        = parseField(3);
-        PathTracerConfig.clearRadius       = parseField(4);
-        PathTracerConfig.trackOtherPlayers = trackOtherPlayers;
-        PathTracerConfig.save();
-        close();
-    }
-
     @Override
     public void close() {
         if (client != null) client.setScreen(parent);
     }
+
+    @FunctionalInterface private interface IntSetter { void set(int v); }
 }

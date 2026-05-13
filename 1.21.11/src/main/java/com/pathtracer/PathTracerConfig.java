@@ -32,8 +32,12 @@ public class PathTracerConfig {
     public static final int  RENDER_RADIUS_MAX     = 256;
     public static final int  MAX_AGE_DAYS_MIN      = 1;
     public static final int  MAX_AGE_DAYS_MAX      = 365;
-    public static final int  CLEAR_RADIUS_MIN      = 8;
-    public static final int  CLEAR_RADIUS_MAX      = 256;
+    public static final int  CLEAR_RADIUS_MIN          = 8;
+    public static final int  CLEAR_RADIUS_MAX          = 256;
+    public static final int  EXPLORER_GRADIENT_MIN     = 1;
+    public static final int  EXPLORER_GRADIENT_MAX     = 14;
+    public static final int  EXPLORER_MAX_AGE_MIN      = 1;
+    public static final int  EXPLORER_MAX_AGE_MAX      = 64;
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -47,7 +51,12 @@ public class PathTracerConfig {
     public static int     renderRadius       = WalkDataStore.RENDER_RADIUS;
     public static int     maxAgeDays         = (int) WalkDataStore.MAX_AGE_DAYS;
     public static int     clearRadius        = WalkDataStore.CLEAR_RADIUS;
-    public static boolean trackOtherPlayers  = WalkDataStore.TRACK_OTHER_PLAYERS;
+    public static boolean trackOtherPlayers   = WalkDataStore.TRACK_OTHER_PLAYERS;
+    public static boolean explorerMode        = WalkDataStore.EXPLORER_MODE;
+    /** How many in-game days span the full green→blue gradient in Explorer Mode. */
+    public static int     explorerGradientDays = 4;
+    /** Max age for Explorer Mode data (1–64 days). Path mode data is pruned at max of both. */
+    public static int     explorerMaxAgeDays   = 64;
 
     // ── Ignored blocks ────────────────────────────────────────────────────────
     public static final Set<String> DEFAULT_IGNORED_BLOCKS = new HashSet<>(Arrays.asList(
@@ -104,7 +113,10 @@ public class PathTracerConfig {
                     if (obj.has("renderRadius"))      renderRadius     = obj.get("renderRadius").getAsInt();
                     if (obj.has("maxAgeDays"))         maxAgeDays       = obj.get("maxAgeDays").getAsInt();
                     if (obj.has("clearRadius"))        clearRadius      = obj.get("clearRadius").getAsInt();
-                    if (obj.has("trackOtherPlayers"))  trackOtherPlayers = obj.get("trackOtherPlayers").getAsBoolean();
+                    if (obj.has("trackOtherPlayers"))   trackOtherPlayers   = obj.get("trackOtherPlayers").getAsBoolean();
+                    if (obj.has("explorerMode"))        explorerMode        = obj.get("explorerMode").getAsBoolean();
+                    if (obj.has("explorerGradientDays")) explorerGradientDays = obj.get("explorerGradientDays").getAsInt();
+                    if (obj.has("explorerMaxAgeDays"))  explorerMaxAgeDays  = obj.get("explorerMaxAgeDays").getAsInt();
                     if (obj.has("ignoredBlocks")) {
                         Set<String> blocks = new HashSet<>();
                         for (JsonElement e : obj.getAsJsonArray("ignoredBlocks"))
@@ -128,7 +140,10 @@ public class PathTracerConfig {
         obj.addProperty("renderRadius",      renderRadius);
         obj.addProperty("maxAgeDays",        maxAgeDays);
         obj.addProperty("clearRadius",       clearRadius);
-        obj.addProperty("trackOtherPlayers", trackOtherPlayers);
+        obj.addProperty("trackOtherPlayers",   trackOtherPlayers);
+        obj.addProperty("explorerMode",        explorerMode);
+        obj.addProperty("explorerGradientDays", explorerGradientDays);
+        obj.addProperty("explorerMaxAgeDays",  explorerMaxAgeDays);
         JsonArray arr = new JsonArray();
         ignoredBlocks.stream().sorted().forEach(arr::add);
         obj.add("ignoredBlocks", arr);
@@ -161,6 +176,10 @@ public class PathTracerConfig {
         WalkDataStore.IGNORED_BLOCKS      = new HashSet<>(ignoredBlocks);
         WalkDataStore.CLEAR_RADIUS        = clearRadius;
         WalkDataStore.TRACK_OTHER_PLAYERS = trackOtherPlayers;
+        WalkDataStore.EXPLORER_MODE          = explorerMode;
+        WalkDataStore.EXPLORER_GRADIENT_DAYS = explorerGradientDays;
+        // Prune at the larger of both ages so no data is lost when switching modes.
+        WalkDataStore.MAX_AGE_DAYS = Math.max(maxAgeDays, explorerMaxAgeDays);
     }
 
     private static Path configFile() {

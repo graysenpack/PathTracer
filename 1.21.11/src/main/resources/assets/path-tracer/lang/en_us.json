@@ -1,6 +1,7 @@
 {
   "key.path-tracer.toggle": "Toggle Path Overlay",
   "key.path-tracer.clear_area": "Clear Nearby Path Data",
+  "key.path-tracer.toggle_mode": "Toggle Explorer / Path Mode",
   "key.categories.path-tracer": "Path Tracer",
   "key.categories.path-tracer.controls": "Path Tracer",
   "key.category.path-tracer.controls": "Path Tracer",

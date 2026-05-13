@@ -132,14 +132,16 @@ public class WalkTracker {
         return feetHasCollision ? feetPos : feetPos.below();
     }
 
-    /** Record a 3×3 footprint if the ground block is not on the ignore list. */
+    /** Record a footprint if the ground block is not on the ignore list.
+     *  Explorer mode always uses 1×1 (radius 0); otherwise uses the configured radius. */
     private static void recordIfAllowed(BlockPos groundPos, WalkDataStore store,
                                          long currentGameDay, Minecraft client) {
         String blockId = BuiltInRegistries.BLOCK
                 .getKey(client.level.getBlockState(groundPos).getBlock()).toString();
         if (WalkDataStore.IGNORED_BLOCKS.contains(blockId)) return;
-        for (int dx = -WalkDataStore.FOOTPRINT_RADIUS; dx <= WalkDataStore.FOOTPRINT_RADIUS; dx++) {
-            for (int dz = -WalkDataStore.FOOTPRINT_RADIUS; dz <= WalkDataStore.FOOTPRINT_RADIUS; dz++) {
+        int radius = WalkDataStore.EXPLORER_MODE ? 0 : WalkDataStore.FOOTPRINT_RADIUS;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
                 store.recordWalk(groundPos.offset(dx, 0, dz), currentGameDay);
             }
         }

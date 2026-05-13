@@ -74,10 +74,13 @@ public class PathRenderer {
         Map<BlockPos, WalkData> walkMap = WalkDataStore.getInstance().getWalkMap();
         if (walkMap.isEmpty()) return;
 
+        boolean explorerMode = WalkDataStore.EXPLORER_MODE;
+        long currentGameDay  = client.level.getGameTime() / 24000L;
+
         Vec3     cam       = context.levelState().cameraRenderState.pos;
         BlockPos playerPos = client.player.blockPosition();
         int      radius    = WalkDataStore.RENDER_RADIUS;
-        int      minWalks  = WalkDataStore.MIN_WALK_THRESHOLD;
+        int      minWalks  = explorerMode ? 1 : WalkDataStore.MIN_WALK_THRESHOLD;
 
         List<Map.Entry<BlockPos, WalkData>> toRender = new ArrayList<>();
         for (Map.Entry<BlockPos, WalkData> entry : walkMap.entrySet()) {
@@ -90,16 +93,15 @@ public class PathRenderer {
         }
         if (toRender.isEmpty()) return;
 
-        // Submit through bufferSource so Iris (if active) can intercept and
-        // route via the assigned BASIC program. Camera-relative coordinates
-        // avoid any PoseStack accumulation issues.
         MultiBufferSource.BufferSource bufferSource = context.bufferSource();
         VertexConsumer vc = bufferSource.getBuffer(RenderTypes.debugFilledBox());
 
         for (Map.Entry<BlockPos, WalkData> entry : toRender) {
             BlockPos pos   = entry.getKey();
             WalkData data  = entry.getValue();
-            int      color = computeColor(data.getCount());
+            int      color = explorerMode
+                    ? computeExplorerColor(currentGameDay - data.getLastGameDay())
+                    : computeColor(data.getCount());
 
             float x1 = pos.getX() - (float) cam.x;
             float y  = pos.getY() + 1.002f - (float) cam.y;
@@ -149,6 +151,41 @@ public class PathRenderer {
         int a = Math.round(50 + 130 * t);
 
         return ARGB.color(a, r, g, 0);
+    }
+
+    /**
+     * 14 fixed colour stops spanning lime green → green → cyan → blue → dark blue → dark grey.
+     * Stop 0 = lime green; stop 13 = dark grey (same as expired).
+     */
+    private static final int[][] EXPLORER_STOPS = {
+        { 50, 255,  50, 200},  //  0 – lime green
+        {  0, 230,  70, 195},  //  1 – bright green
+        {  0, 200,  80, 190},  //  2 – green
+        {  0, 195, 130, 185},  //  3 – green-teal
+        {  0, 205, 195, 180},  //  4 – teal
+        {  0, 185, 230, 175},  //  5 – cyan
+        {  0, 150, 255, 170},  //  6 – light blue
+        {  0, 100, 255, 165},  //  7 – blue
+        { 30,  60, 230, 160},  //  8 – royal blue
+        { 40,  30, 200, 155},  //  9 – medium blue
+        { 20,  20, 170, 150},  // 10 – dark blue
+        { 10,  10, 140, 145},  // 11 – navy
+        { 10,  10, 110, 140},  // 12 – dark navy
+        { 90,  90,  90, 130},  // 13 – dark grey (gradient end = expired)
+    };
+    private static final int[] EXPLORER_EXPIRED = {90, 90, 90, 130};
+
+    /**
+     * Evenly stretches the 14-stop palette across the gradient window.
+     * Day 0 = stop 0 (lime green); day gradientDays−1 = stop 13 (dark grey).
+     * Ages ≥ gradientDays return the same dark grey (seamless expiry).
+     */
+    private static int computeExplorerColor(long ageDays) {
+        int gradDays = WalkDataStore.EXPLORER_GRADIENT_DAYS;
+        if (ageDays >= gradDays) return ARGB.color(EXPLORER_EXPIRED[3], EXPLORER_EXPIRED[0], EXPLORER_EXPIRED[1], EXPLORER_EXPIRED[2]);
+        int[] c = (gradDays == 1) ? EXPLORER_STOPS[0]
+                : EXPLORER_STOPS[Math.min((int) Math.round(ageDays * 13.0 / (gradDays - 1)), 13)];
+        return ARGB.color(c[3], c[0], c[1], c[2]);
     }
 
 }

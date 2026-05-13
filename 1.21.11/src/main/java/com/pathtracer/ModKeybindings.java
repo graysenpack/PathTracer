@@ -24,6 +24,7 @@ public class ModKeybindings {
 
     public static KeyBinding toggleOverlay;
     public static KeyBinding clearArea;
+    public static KeyBinding toggleMode;
 
     public static void register() {
         var category = KeyBinding.Category.create(
@@ -38,12 +39,28 @@ public class ModKeybindings {
         clearArea = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.path-tracer.clear_area",
                 InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_UNKNOWN,
+                category));
+
+        toggleMode = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.path-tracer.toggle_mode",
+                InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_UNKNOWN,   // unbound by default
                 category));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (toggleOverlay.wasPressed()) {
                 PathRenderer.toggleOverlay();
+            }
+            while (toggleMode.wasPressed()) {
+                PathTracerConfig.explorerMode = !PathTracerConfig.explorerMode;
+                PathTracerConfig.save();
+                if (client.player != null) {
+                    String msg = PathTracerConfig.explorerMode
+                            ? "§b[PathTracer] Explorer Mode"
+                            : "§a[PathTracer] Path Building Mode";
+                    client.player.sendMessage(Text.literal(msg), true);
+                }
             }
             while (clearArea.wasPressed()) {
                 if (client.player == null) return;

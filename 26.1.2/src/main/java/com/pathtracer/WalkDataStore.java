@@ -46,6 +46,10 @@ public class WalkDataStore {
     // Whether to record walk data for other players in the same world.
     public static boolean TRACK_OTHER_PLAYERS = false;
 
+    // Explorer mode: age-based coloring, 1×1 footprint, threshold = 1.
+    public static boolean EXPLORER_MODE          = false;
+    public static int     EXPLORER_GRADIENT_DAYS = 14;
+
     private static WalkDataStore instance;
 
     private final Map<BlockPos, WalkData> walkMap = new HashMap<>();
